@@ -5,14 +5,15 @@
 export const OPS = new Set([
   'purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch',
   'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff',
-  'saveItem', 'savePartner', 'resetBooks', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck',
+  'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck',
 ]);
 
 function syncActor(E, profile) {
   const S = E.S;
   let u = S.users.find(x => x.id === profile.user_id);
   if (!u) { u = { id: profile.user_id }; S.users.push(u); }
-  Object.assign(u, { username: profile.username, name: profile.name, role: profile.role, active: profile.active });
+  Object.assign(u, { username: profile.username, role: profile.role, active: profile.active });
+  if (!u.name) u.name = profile.name; // the display name is chosen by the user (My account)
   S.currentUser = profile.user_id;
 }
 

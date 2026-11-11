@@ -1,2 +1,1 @@
-/* Boom Meat ERP — server connection (public anon key; data is protected by login + row level security). */
-window.BOOM_CONFIG = { url: "https://guotkuokwedtwngsvsee.supabase.co", anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1b3RrdW9rd2VkdHduZ3N2c2VlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQzOTY5NDYsImV4cCI6MjEwOTk3Mjk0Nn0.VqaaE8n1bDKIl3sUic_-YUYqoRvnc-8vPMpnsDP2hWw" };
+window.BOOM_CONFIG = null;

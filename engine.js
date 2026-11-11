@@ -32,9 +32,12 @@ const CAT_ACC = { carcass: '1301', meat: '1301', byproduct: '1301', spice: '1302
 const CAT_NAME = { carcass: 'لحوم بالعضم', meat: 'قطعيات ولحوم', byproduct: 'نواتج تقطيع', spice: 'توابل وإضافات', pack: 'مواد تعبئة', product: 'منتج تام' };
 const METHOD_ACC = { cash: '1101', bank: '1102', instapay: '1103' };
 const METHOD_NAME = { cash: 'كاش', bank: 'تحويل بنكي', instapay: 'إنستاباي', credit: 'آجل' };
+// store kinds: receiving (goods in), raw (production chillers: meat & spices), pack (packaging), fg (finished-goods freezers)
+const WH_USE = { receiving: 'مخزن استلام', raw: 'تلاجة إنتاج (خامات)', pack: 'مخزن تعبئة', fg: 'فريزر منتج تام' };
 const WAREHOUSES = [
-  { id: 'W1', name: 'مخزن الاستلام' }, { id: 'W2', name: 'تلاجة الإنتاج' },
-  { id: 'W3', name: 'مخزن التعبئة والتغليف' }, { id: 'W4', name: 'فريزر المنتج التام' },
+  { id: 'W1', name: 'مخزن الاستلام', use: 'receiving' }, { id: 'W2', name: 'تلاجة الإنتاج ١', use: 'raw' },
+  { id: 'W3', name: 'مخزن التعبئة والتغليف', use: 'pack' }, { id: 'W4', name: 'فريزر المنتج التام ١', use: 'fg' },
+  { id: 'W5', name: 'تلاجة الإنتاج ٢', use: 'raw' }, { id: 'W6', name: 'فريزر المنتج التام ٢', use: 'fg' },
 ];
 const PACK_SIZES = [250, 500, 1000, 1500, 2000, 2500];
 const packsOf = p => (p.packs && p.packs.length ? p.packs : [500, 1000, 1500, 2000, 2500]);
@@ -89,7 +92,7 @@ let seeding = false, seedClock = 0, seedDay = null;
 
 function freshState() {
   return {
-    version: DATA_VERSION, mode: 'demo', seq: {}, createdAt: new Date().toISOString(),
+    version: DATA_VERSION, mode: 'demo', warehouses: JSON.parse(JSON.stringify(WAREHOUSES)), seq: {}, createdAt: new Date().toISOString(),
     settings: {
       vatRate: 14, issueLimitKg: 100, fgShelfDays: 90, telegram: true, tgToken: '', tgChat: '',
       company: { name: 'بوم ميت للحوم', nameEn: 'Boom Meat', address: 'المنطقة الصناعية · مدينة ١٥ مايو · القاهرة', phone: '(+2) 01033004411', taxId: '000-000-000' },
@@ -117,7 +120,15 @@ const me = () => S.users.find(u => u.id === S.currentUser) || { id: S.currentUse
 const userName = id => (S.users.find(u => u.id === id) || {}).name || '—';
 const item = id => { const it = S.items.find(i => i.id === id); if (!it) throw new Error('صنف غير معروف'); return it; };
 const partner = id => { const p = S.partners.find(x => x.id === id); if (!p) throw new Error('عميل/مورد غير معروف'); return p; };
-const whName = id => (WAREHOUSES.find(w => w.id === id) || {}).name || id;
+const warehouses = () => (S && S.warehouses) || WAREHOUSES;
+const whName = id => (warehouses().find(w => w.id === id) || {}).name || id;
+const whUse = id => (warehouses().find(w => w.id === id) || {}).use;
+const whs = use => warehouses().filter(w => w.use === use).map(w => w.id);
+function ensureWarehouses(st) { // books saved before stores became configurable
+  if (!st.warehouses) st.warehouses = JSON.parse(JSON.stringify(WAREHOUSES));
+  for (const w of st.warehouses) if (!w.use) w.use = (WAREHOUSES.find(x => x.id === w.id) || {}).use || 'raw';
+  return st;
+}
 
 function audit(action, ref, text, date) {
   S.audit.push({ id: uid('A'), at: stamp(date || today()), user: S.currentUser, action, ref, text });
@@ -195,7 +206,8 @@ function opening({ date, cash, bank, assets }) {
   });
 }
 
-function purchase({ date, supplierId, ref, lines, wh = 'W1' }) {
+function purchase({ date, supplierId, ref, lines, wh }) {
+  wh = wh || whs('receiving')[0];
   return tx(() => {
     perm('storekeeper', 'accountant'); checkDate(date);
     const sup = partner(supplierId); need(sup.type === 'supplier', 'اختار مورد');
@@ -231,12 +243,12 @@ function transfer({ date, lotId, qty, toWh }) {
   return tx(() => {
     perm('storekeeper', 'supervisor'); checkDate(date);
     const l = S.lots.find(x => x.id === lotId); need(l, 'الدفعة غير موجودة');
-    need(l.wh !== 'W4' && toWh !== 'W4', 'المنتج التام بيدخل الفريزر من قفل التشغيلة بس');
+    need(warehouses().some(w => w.id === toWh), 'المكان غير صحيح');
     need(toWh !== l.wh, 'اختار مكان مختلف');
-    need(WAREHOUSES.some(w => w.id === toWh), 'المكان غير صحيح');
+    need((whUse(l.wh) === 'fg') === (whUse(toWh) === 'fg'), 'المنتج التام بيتنقل بين فريزرات المنتج التام بس، والخامات مينفعش تدخلها');
     need(isInt(qty) && qty > 0 && qty <= l.qty, 'الكمية أكبر من رصيد الدفعة');
     const it = item(l.itemId);
-    if (it.cat === 'pack') need(toWh !== 'W2', 'مواد التعبئة مكانها مخزن التعبئة');
+    if (it.cat === 'pack') need(whUse(toWh) !== 'raw', 'مواد التعبئة مكانها مخزن التعبئة');
     const no = nextNo('TR');
     const from = l.wh;
     let moved;
@@ -294,8 +306,7 @@ function issuedOf(b, itemId) { return b.issues.filter(i => !i.reversed && i.item
 function _issue(b, itemId, qty, date, note) {
   const it = item(itemId);
   need(['meat', 'spice', 'pack', 'byproduct'].includes(it.cat), `"${it.name}" مش بيتصرف على تشغيلة`);
-  const whs = it.cat === 'pack' ? ['W3'] : ['W2'];
-  const parts = consume(itemId, qty, whs);
+  const parts = consume(itemId, qty, it.cat === 'pack' ? whs('pack') : whs('raw'));
   const value = parts.reduce((s, p) => s + p.value, 0);
   const ln = { id: uid('I'), itemId, qty, value, parts, by: S.currentUser, at: stamp(date), reversed: false, note: note || '' };
   b.issues.push(ln);
@@ -355,7 +366,7 @@ function decideCorrection(id, approve) {
 function bagItemFor(size) { const it = S.items.find(i => i.cat === 'pack' && i.packFor === size); need(it, 'مفيش كيس معرّف للعبوة ' + size / 1000 + ' كجم'); return it; }
 function stickerItem() { const it = S.items.find(i => i.cat === 'pack' && i.sticker); need(it, 'مفيش استيكر معرّف'); return it; }
 
-function closeBatch({ batchId, date, packs }) {
+function closeBatch({ batchId, date, packs, split }) {
   return tx(() => {
     perm('supervisor'); checkDate(date);
     const b = batchById(batchId); need(b.status === 'open', 'التشغيلة مقفولة بالفعل');
@@ -376,7 +387,17 @@ function closeBatch({ batchId, date, packs }) {
     const sizes = PACK_SIZES.filter(s => packs[s]);
     const vals = alloc(cost, sizes.map(s => packs[s] * s));
     const p = item(b.productId);
-    sizes.forEach((s, i) => newLot({ itemId: p.id, wh: 'W4', qty: packs[s] * s, value: vals[i], inDate: date, prodDate: date, expDate: addDays(date, S.settings.fgShelfDays), packSize: s, src: { type: 'batch', id: b.id, no: b.no }, batchId: b.id }));
+    // where the packs go: one freezer by default, or split across finished-goods freezers
+    const fgW = whs('fg'); need(fgW.length, 'مفيش فريزر منتج تام متعرّف');
+    const dest = (split && split.length ? split : [{ wh: fgW[0], packs }]).map(d => ({ wh: d.wh, packs: d.packs || {} }));
+    for (const d of dest) need(whUse(d.wh) === 'fg', `"${whName(d.wh)}" مش فريزر منتج تام`);
+    for (const s2 of PACK_SIZES) { const tot = dest.reduce((a, d) => a + (d.packs[s2] || 0), 0); need(tot === (packs[s2] || 0), `توزيع عبوات ${s2 / 1000} كجم على الفريزرات (${tot}) مش مساوي للعدد (${packs[s2] || 0})`); }
+    sizes.forEach((s, i) => {
+      const parts = dest.filter(d => d.packs[s] > 0);
+      const v = alloc(vals[i], parts.map(d => d.packs[s]));
+      parts.forEach((d, k) => newLot({ itemId: p.id, wh: d.wh, qty: d.packs[s] * s, value: v[k], inDate: date, prodDate: date, expDate: addDays(date, S.settings.fgShelfDays), packSize: s, src: { type: 'batch', id: b.id, no: b.no }, batchId: b.id }));
+    });
+    b.split = dest.filter(d => Object.values(d.packs).some(n => n > 0));
     b.je = post({ date, type: 'batch_close', ref: { type: 'batch', id: b.id, no: b.no }, memo: `قفل التشغيلة ${b.no}: ${p.name} ${fmtQty(output, 'kg')}`, lines: [{ acc: '1305', dr: cost }, { acc: '1304', cr: cost }] }).no;
     Object.assign(b, { status: 'closed', packs: { ...packs }, output, inputKg, waste: inputKg - output, cost, costPerKg: mulDiv(cost, 1000, output), closedAt: stamp(date), closeDate: date, closedBy: S.currentUser });
     audit('batch_close', b.no, `قفل ${b.no}: ناتج ${fmtQty(output, 'kg')} من ${fmtQty(inputKg, 'kg')} (هدر ${fmtQty(b.waste, 'kg')})، تكلفة الكيلو ${money(b.costPerKg)}`, date);
@@ -404,7 +425,7 @@ function invoice({ date, customerId, lines, discount = 0, method }) {
       need(isInt(price) && price > 0, `سعر "${p.name}" غير صحيح`);
       if (ln.pricePerKg != null && ln.pricePerKg !== priceFor(p, c)) perm();
       const qty = ln.count * ln.packSize;
-      const parts = consume(p.id, qty, ['W4'], ln.packSize);
+      const parts = consume(p.id, qty, whs('fg'), ln.packSize);
       const cost = parts.reduce((s, x) => s + x.value, 0);
       const amount = mulDiv(qty, price, 1000);
       doc.lines.push({ productId: p.id, packSize: ln.packSize, count: ln.count, qty, pricePerKg: price, amount, cost, parts });
@@ -538,6 +559,16 @@ function writeOff({ date, lotId, qty, reason }) {
 }
 
 /* ---------- users (auth accounts live on the server; this keeps names/roles for the books) ---------- */
+function updateSelf({ name, avatar }) {
+  return tx(() => {
+    const u = S.users.find(x => x.id === S.currentUser); need(u, 'المستخدم غير موجود'); need(u.active !== false, 'الحساب ده موقوف');
+    need(name && name.trim().length >= 2 && name.trim().length <= 40, 'الاسم لازم من ٢ لـ ٤٠ حرف');
+    if (avatar !== undefined && avatar !== null && avatar !== '') { need(typeof avatar === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(avatar), 'الصورة لازم تكون PNG أو JPG'); need(avatar.length <= 90000, 'الصورة كبيرة، اختار صورة أصغر'); }
+    const old = u.name; u.name = name.trim(); if (avatar !== undefined) u.avatar = avatar || '';
+    audit('profile', u.username || u.id, old !== u.name ? `غيّر اسمه من ${old} إلى ${u.name}` : 'حدّث صورته');
+    return { name: u.name, avatar: u.avatar || '' };
+  });
+}
 function upsertUser({ id, username, name, role, active = true }) {
   return tx(() => {
     perm();
@@ -577,7 +608,7 @@ function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], 
       const it = item(st.itemId);
       need(isInt(st.qty) && st.qty > 0, `كمية "${it.name}" غير صحيحة`); need(isInt(st.unitCost) && st.unitCost > 0, `تكلفة "${it.name}" غير صحيحة`);
       need(st.expDate && st.expDate > date, `صلاحية "${it.name}" لازم تكون بعد تاريخ البداية`);
-      const wh = it.cat === 'product' ? 'W4' : it.cat === 'pack' ? 'W3' : (st.wh || 'W2');
+      const wh = it.cat === 'product' ? (whUse(st.wh) === 'fg' ? st.wh : whs('fg')[0]) : it.cat === 'pack' ? whs('pack')[0] : (['raw', 'receiving'].includes(whUse(st.wh)) ? st.wh : whs('raw')[0]);
       if (it.cat === 'product') { need(packsOf(it).includes(st.packSize), `اختار عبوة "${it.name}"`); need(st.qty % st.packSize === 0, `كمية "${it.name}" لازم تكون عدد عبوات كامل`); }
       const value = mulDiv(st.qty, st.unitCost, unitBase(it.unit));
       newLot({ itemId: it.id, wh, qty: st.qty, value, inDate: date, prodDate: st.prodDate || date, expDate: st.expDate, packSize: it.cat === 'product' ? st.packSize : null, src: { type: 'opening', no } });
@@ -600,7 +631,7 @@ function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], 
 function resetBooks() {
   return tx(() => {
     perm();
-    const keep = { users: S.users, items: S.items, partners: S.partners, recipes: S.recipes, settings: S.settings, currentUser: S.currentUser, mode: S.mode, priceHistory: S.priceHistory };
+    const keep = { warehouses: S.warehouses, users: S.users, items: S.items, partners: S.partners, recipes: S.recipes, settings: S.settings, currentUser: S.currentUser, mode: S.mode, priceHistory: S.priceHistory };
     const by = S.currentUser, counts = `${S.journal.length} قيد، ${S.docs.invoices.length} فاتورة، ${S.docs.batches.length} تشغيلة`;
     S = Object.assign(freshState(), keep);
     S.partners = S.partners.filter(p => !p.sample);
@@ -610,6 +641,22 @@ function resetBooks() {
   });
 }
 
+function saveWarehouse({ id, name, use }) {
+  return tx(() => {
+    perm('storekeeper');
+    need(name && name.trim().length >= 2, 'اكتب اسم التلاجة أو المخزن'); need(WH_USE[use], 'اختار النوع');
+    if (id) {
+      const w = warehouses().find(x => x.id === id); need(w, 'المكان غير موجود');
+      if (w.use !== use) need(!S.lots.some(l => l.wh === id && l.qty > 0), 'فيه بضاعة جوه، فرّغه الأول عشان تغيّر نوعه');
+      const old = w.name; w.name = name.trim(); w.use = use;
+      audit('warehouse', id, `تعديل ${old} ← ${w.name} (${WH_USE[use]})`); return w;
+    }
+    need(!warehouses().some(w => w.name === name.trim()), 'الاسم ده موجود قبل كده');
+    const n = Math.max(0, ...warehouses().map(w => parseInt(w.id.slice(1), 10) || 0)) + 1;
+    const w = { id: 'W' + n, name: name.trim(), use }; S.warehouses.push(w);
+    audit('warehouse', w.id, `إضافة ${WH_USE[use]}: ${w.name}`); return w;
+  });
+}
 function setRecipe(productId, mix) {
   return tx(() => {
     perm('supervisor');
@@ -846,7 +893,7 @@ function money(p, dec) { const v = p / 100; return v.toLocaleString('en-US', { m
 /* ---------- persistence ---------- */
 function save() { if (!S || S.mode === 'live' || typeof localStorage === 'undefined' || !localStorage) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { console.warn('save failed', e); } }
 function load() {
-  try { const raw = localStorage.getItem(STORE_KEY); if (raw) { const s = JSON.parse(raw); if (s && s.version === DATA_VERSION) { S = s; return true; } } } catch (e) { /* ignore */ }
+  try { const raw = localStorage.getItem(STORE_KEY); if (raw) { const s = JSON.parse(raw); if (s && s.version === DATA_VERSION) { S = ensureWarehouses(s); return true; } } } catch (e) { /* ignore */ }
   return false;
 }
 function reset() { seed(); save(); }
@@ -923,7 +970,7 @@ function liveState(owner) {
   S.settings.tgToken = ''; S.settings.tgChat = '';
   return S;
 }
-function setState(st) { S = st; return S; }
+function setState(st) { S = ensureWarehouses(st); return S; }
 
 /* ---------- demo data (generated through the same operations) ---------- */
 function rngFactory(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -974,12 +1021,14 @@ function seed() {
 
   // opening stock for EVERY item (sample): 500 kg of each website product, frozen cuts, spices, packaging
   as('u1', () => openingBalances({ date: start, stock: S.items.filter(i => !['byproduct', 'carcass'].includes(i.cat)).map(it => {
-    if (it.cat === 'product') { const pk = packsOf(it).includes(1000) ? 1000 : Math.max(...packsOf(it).filter(z => z <= 1000)); return { itemId: it.id, qty: kg(500), packSize: pk, unitCost: Math.round(it.priceWholesale * 0.7 / 100) * 100, expDate: addDays(start, it.group === 'لحوم باردة' ? 60 : 90) }; }
+    if (it.cat === 'product') { const pk = packsOf(it).includes(1000) ? 1000 : Math.max(...packsOf(it).filter(z => z <= 1000)); return { wh: parseInt(it.code.slice(3), 10) % 2 ? 'W6' : 'W4', itemId: it.id, qty: kg(500), packSize: pk, unitCost: Math.round(it.priceWholesale * 0.7 / 100) * 100, expDate: addDays(start, it.group === 'لحوم باردة' ? 60 : 90) }; }
     if (it.cat === 'meat') return { itemId: it.id, qty: kg(it.id === 'it_RM-106' ? 80 : 250), unitCost: Math.round(it.priceRetail * 0.6 / 100) * 100, expDate: addDays(start, 120), wh: 'W2' };
     if (it.cat === 'spice') return { itemId: it.id, qty: kg(it.code === 'SP-204' ? 300 : 60), unitCost: egp(it.code === 'SP-204' ? 38 : it.code === 'SP-207' ? 8 : 120), expDate: addDays(start, 180), wh: 'W2' };
     return { itemId: it.id, qty: it.sticker ? 10000 : 3000, unitCost: egp(it.sticker ? 0.6 : 2.5), expDate: addDays(start, 720) };
   }) }));
 
+  // the supervisor puts about 60% of each run in freezer 1 and the rest in freezer 2
+  const splitPacks = packs => { const a = {}, b2 = {}; for (const [z, n] of Object.entries(packs)) { if (!n) continue; a[z] = Math.ceil(n * 0.6); b2[z] = n - a[z]; } return [{ wh: 'W4', packs: a }, { wh: 'W6', packs: b2 }]; };
   const RECIPES = {
     'it_FG-401': { mix: { 'it_RM-101': 48, 'it_RM-102': 24, 'it_RM-104': 10, 'it_RM-103': 8, 'it_RM-106': 8, 'it_SP-201': 2 }, sizes: { 1000: 0.55, 500: 0.45 } },
     'it_FG-402': { mix: { 'it_RM-105': 55, 'it_RM-103': 15, 'it_RM-106': 15, 'it_RM-101': 12, 'it_SP-202': 3 }, sizes: { 1000: 0.6, 500: 0.4 } },
@@ -999,7 +1048,7 @@ function seed() {
       { itemId: 'it_SP-201', qty: kg(70), unitCost: egp(150), expDate: addDays(date, 180) }, { itemId: 'it_SP-202', qty: kg(70), unitCost: egp(140), expDate: addDays(date, 180) },
       { itemId: 'it_SP-203', qty: kg(40), unitCost: egp(165), expDate: addDays(date, 180) }, { itemId: 'it_SP-204', qty: kg(350), unitCost: egp(38), expDate: addDays(date, 240) },
       { itemId: 'it_SP-205', qty: kg(100), unitCost: egp(45), expDate: addDays(date, 120) }] }));
-    moveAll(date, d.lines.map(l => S.lots.find(x => x.id === l.lotId)), 'W2');
+    moveAll(date, d.lines.map(l => S.lots.find(x => x.id === l.lotId)), 'W5');
   };
   const buyPack = date => {
     const d1 = as('u3', () => purchase({ date, supplierId: 's4', ref: 'AB-' + ri(1000, 9999), lines: [
@@ -1013,7 +1062,7 @@ function seed() {
     const q = kg(ri(8, 10) * 100);
     const d = as('u3', () => purchase({ date, supplierId: 's1', ref: 'WD-' + ri(1000, 9999), lines: [{ itemId: 'it_RM-100', qty: q, unitCost: egp(ri(226, 238)), prodDate: addDays(date, -1), expDate: addDays(date, 10) }] }));
     const lot = S.lots.find(x => x.id === d.lines[0].lotId);
-    as('u3', () => transfer({ date, lotId: lot.id, qty: lot.qty, toWh: 'W2' }));
+    as('u3', () => transfer({ date, lotId: lot.id, qty: lot.qty, toWh: R() < 0.5 ? 'W2' : 'W5' }));
     const shares = [['it_RM-101', 0.17], ['it_RM-102', 0.12], ['it_RM-103', 0.08], ['it_RM-104', 0.09], ['it_RM-105', 0.22], ['it_RM-106', 0.08], ['it_RM-190', 0.20]];
     const outputs = shares.map(([id, s]) => ({ itemId: id, qty: Math.round(lot.qty * (s + rnd(-0.01, 0.01)) / 100) * 100 }));
     const cutQty = addDays(date, 5) > today() ? lot.qty - kg(100) : lot.qty; // the latest delivery keeps 100 kg on the hook
@@ -1031,10 +1080,10 @@ function seed() {
   const runBatch = (date, productId, totalKg, close) => {
     const mix = RECIPES[productId].mix;
     let want = Object.entries(mix).map(([id, pct]) => [id, totalKg * pct / 100 * (1 + rnd(-0.06, 0.06))]);
-    const fit = Math.min(1, ...want.map(([id, k]) => available(id, ['W2']) / 1000 / k));
+    const fit = Math.min(1, ...want.map(([id, k]) => available(id, whs('raw')) / 1000 / k));
     if (fit < 0.45) return null;
     want = want.map(([id, k]) => [id, Math.max(500, Math.floor(k * fit * 2) * 500)]);
-    if (want.some(([id, q]) => available(id, ['W2']) < q)) return null;
+    if (want.some(([id, q]) => available(id, whs('raw')) < q)) return null;
     const b = as('u4', () => createBatch({ date, productId, planned: kg(totalKg) }));
     for (const [id, q] of want) {
       if (q > kg(60) && R() < 0.5) { const a = Math.round(q / 2 / 500) * 500; as('u5', () => issue({ batchId: b.id, itemId: id, qty: a, date })); as('u5', () => issue({ batchId: b.id, itemId: id, qty: q - a, date })); }
@@ -1046,19 +1095,19 @@ function seed() {
     const sizes = RECIPES[productId].sizes; const packs = {}; let rem = out;
     for (const s of [2500, 2000, 1500, 1000]) { if (!sizes[s]) continue; const n = Math.floor(out * sizes[s] / s); packs[s] = n; rem -= n * s; }
     packs[500] = rem / 500;
-    as('u4', () => closeBatch({ batchId: b.id, date, packs }));
+    as('u4', () => closeBatch({ batchId: b.id, date, packs, split: splitPacks(packs) }));
     return b;
   };
   const sell = (date, cid, targetKg) => {
     const c = S.partners.find(p => p.id === cid);
-    const fg = S.items.filter(i => i.cat === 'product' && available(i.id, ['W4']) > kg(i.group === 'مصنعات' ? 60 : 160)); // keep a sample balance of every product
+    const fg = S.items.filter(i => i.cat === 'product' && available(i.id, whs('fg')) > kg(i.group === 'مصنعات' ? 60 : 160)); // keep a sample balance of every product
     if (!fg.length) return null;
     const lines = []; let got = 0; const tried = new Set();
     while (got < targetKg && tried.size < 14) {
       const p = R() < 0.55 ? pick(fg.filter(x => x.group === 'مصنعات').concat(fg)) : pick(fg); const sizes = packsOf(p); const size = pick(c.kind === 'wholesale' ? sizes.slice(-3) : sizes.slice(0, 3));
       const key = p.id + size; if (tried.has(key)) { tried.add(key + Math.random()); continue; } tried.add(key);
       const reserve = kg(p.group === 'مصنعات' ? 40 : 120);
-      const av = Math.floor(Math.max(0, Math.min(available(p.id, ['W4'], size), available(p.id, ['W4']) - reserve)) / size);
+      const av = Math.floor(Math.max(0, Math.min(available(p.id, whs('fg'), size), available(p.id, whs('fg')) - reserve)) / size);
       if (!av) continue;
       const n = Math.min(av, Math.max(1, Math.round((targetKg - got) / size * rnd(0.4, 1))));
       lines.push({ productId: p.id, packSize: size, count: n }); got += n * size;
@@ -1080,21 +1129,21 @@ function seed() {
       continue;
     }
     // storekeeper disposes of expired stock and weekly bones
-    for (const l of S.lots.filter(x => x.qty > 0 && x.wh !== 'W4' && (x.cat === 'byproduct' ? wd === 3 : x.expDate < d))) as('u3', () => writeOff({ date: d, lotId: l.id, qty: l.qty, reason: l.cat === 'byproduct' ? 'تسليم العضم لمصنع الأعلاف' : 'انتهاء الصلاحية' }));
+    for (const l of S.lots.filter(x => x.qty > 0 && whUse(x.wh) !== 'fg' && (x.cat === 'byproduct' ? wd === 3 : x.expDate < d))) as('u3', () => writeOff({ date: d, lotId: l.id, qty: l.qty, reason: l.cat === 'byproduct' ? 'تسليم العضم لمصنع الأعلاف' : 'انتهاء الصلاحية' }));
     if (i % 5 === 0 && !isLast) buyCarcass(d);
     if (i % 10 === 1) buyCuts(d);
     // production
     const nb = isLast ? 1 : ri(1, 2);
     for (let k = 0; k < nb; k++) {
       // supervisor plans around what is in the fridge: product whose main cut is most available
-      const pid = R() < 0.35 ? pickProduct() : Object.keys(RECIPES).map(id => [id, Object.entries(RECIPES[id].mix).reduce((s, [m, pct]) => s + (pct >= 10 ? available(m, ['W2']) * pct : 0), 0) * rnd(0.7, 1.3)]).sort((a, b) => b[1] - a[1])[0][0];
+      const pid = R() < 0.35 ? pickProduct() : Object.keys(RECIPES).map(id => [id, Object.entries(RECIPES[id].mix).reduce((s, [m, pct]) => s + (pct >= 10 ? available(m, whs('raw')) * pct : 0), 0) * rnd(0.7, 1.3)]).sort((a, b) => b[1] - a[1])[0][0];
       const big = R() < 0.12 && pid === 'it_FG-401';
       runBatch(d, pid, big ? ri(170, 185) : ri(100, 150), true);
     }
     // packaging batch for a cut: raw cut → vacuum packs (one or two a day)
     if (!isLast) for (let k = 0; k < ri(1, 2); k++) {
       const cuts = S.items.filter(it => it.cat === 'product' && ['قطعيات', 'قطعيات مميزة'].includes(it.group));
-      const cands = cuts.map(p => { const raw = Object.keys(S.recipes[p.id] || {})[0]; return { p, raw, av: raw ? available(raw, ['W2']) - kg(60) : 0 }; }).filter(x => x.av >= kg(30)); // leave 60 kg of each raw cut in the chiller
+      const cands = cuts.map(p => { const raw = Object.keys(S.recipes[p.id] || {})[0]; return { p, raw, av: raw ? available(raw, whs('raw')) - kg(60) : 0 }; }).filter(x => x.av >= kg(30)); // leave 60 kg of each raw cut in the chiller
       if (!cands.length) break;
       const { p, raw, av } = pick(cands);
       const q = Math.min(av, kg(ri(30, 90))) - (Math.min(av, kg(ri(30, 90))) % 500);
@@ -1106,23 +1155,23 @@ function seed() {
       const nBig = Math.floor(out * 0.7 / big), rest = out - nBig * big;
       const packs = { [big]: nBig }; if (rest % small === 0) packs[small] = (packs[small] || 0) + rest / small; else { packs[big] = nBig; }
       const total = Object.entries(packs).reduce((sum, [z, n]) => sum + z * n, 0);
-      if (total > 0 && total <= q) as('u4', () => closeBatch({ batchId: b.id, date: d, packs }));
+      if (total > 0 && total <= q) as('u4', () => closeBatch({ batchId: b.id, date: d, packs, split: splitPacks(packs) }));
     }
     // cold cuts line: minced beef + seasoning into ¼ / ½ kg packs
     if (!isLast && R() < 0.8) {
       const cold = S.items.filter(it => it.group === 'لحوم باردة' || it.group === 'مقبلات');
-      const p = cold.slice().sort((a, b) => available(a.id, ['W4']) - available(b.id, ['W4']))[ri(0, 2)];
+      const p = cold.slice().sort((a, b) => available(a.id, whs('fg')) - available(b.id, whs('fg')))[ri(0, 2)];
       const mix = [['it_RM-105', 0.9], ['it_RM-106', 0.05], ['it_SP-207', 0.03], ['it_SP-208', 0.02]];
       const total = kg(ri(40, 70));
       const want = mix.map(([id, f]) => [id, Math.round(total * f / 500) * 500 || 500]);
-      if (want.every(([id, q]) => available(id, ['W2']) >= q)) {
+      if (want.every(([id, q]) => available(id, whs('raw')) >= q)) {
         const b = as('u4', () => createBatch({ date: d, productId: p.id, planned: total }));
         for (const [id, q] of want) as('u5', () => issue({ batchId: b.id, itemId: id, qty: q, date: d }));
         const inKg = want.reduce((x, w) => x + w[1], 0), out = Math.floor(inKg * rnd(0.975, 0.99) / 500) * 500;
         const sizes = packsOf(p); const half = sizes.includes(500) ? 500 : sizes[0];
         const n250 = sizes.includes(250) ? Math.floor(out * 0.6 / 500) * 2 : 0; // even count keeps the rest in whole ½ kg packs
         const packs = { 250: n250 }; packs[half] = (packs[half] || 0) + (out - n250 * 250) / half;
-        if (Number.isInteger(packs[half]) && out > 0) as('u4', () => closeBatch({ batchId: b.id, date: d, packs }));
+        if (Number.isInteger(packs[half]) && out > 0) as('u4', () => closeBatch({ batchId: b.id, date: d, packs, split: splitPacks(packs) }));
       }
     }
     // sales
@@ -1150,7 +1199,7 @@ function seed() {
   // today: one batch in progress (partially issued) + one just opened + a pending correction
   const b1 = as('u4', () => createBatch({ date: end, productId: 'it_FG-401', planned: kg(150) }));
   const iss = [];
-  for (const [id, q] of [['it_RM-101', kg(92)], ['it_RM-102', kg(45)], ['it_RM-106', kg(12)]]) if (available(id, ['W2']) >= q) iss.push(as('u5', () => issue({ batchId: b1.id, itemId: id, qty: q, date: end })));
+  for (const [id, q] of [['it_RM-101', kg(92)], ['it_RM-102', kg(45)], ['it_RM-106', kg(12)]]) if (available(id, whs('raw')) >= q) iss.push(as('u5', () => issue({ batchId: b1.id, itemId: id, qty: q, date: end })));
   if (iss[1]) as('u5', () => requestCorrection({ batchId: b1.id, issueId: iss[1].id, newQty: kg(44), reason: 'كتبت ٤٥ والميزان كان ٤٤' }));
   as('u4', () => createBatch({ date: end, productId: 'it_FG-403', planned: kg(100) }));
   seeding = false; seedDay = null;
@@ -1163,11 +1212,11 @@ function init() { if (!load()) { seed(); save(); } return S; }
 
 root.ERP = {
   init, reset, save, exportJSON, get S() { return S; },
-  ACCOUNTS, LEAF, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, PACK_SIZES, ROLES, EXPENSE_ACCS,
+  ACCOUNTS, LEAF, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
   item, partner, userName, whName, me, available, cashBalance, partnerBalance, partnerStatement, batchById, issuedOf, priceFor, monthlyDepreciation,
   opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
-  saveItem, savePartner, resetBooks, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
+  saveItem, savePartner, resetBooks, updateSelf, saveWarehouse, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
   ledger, bal, trialBalance, incomeStatement, balanceSheet, manufacturingAccount, integrity, stockAlerts, fmtQty, money, accType, debitNature, leafUnder,
 };
 })(typeof window !== 'undefined' ? window : globalThis);

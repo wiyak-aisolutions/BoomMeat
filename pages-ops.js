@@ -2,11 +2,13 @@
 (function () {
 'use strict';
 const U = window.UI, E = U.E, S = U.S;
-const { esc, tx, fm, fm0, kgf, qtyf, pct, df, tf, packName, toG, toP, toI, canCost, isOwner, ic, PAGES, ACTS, page, modal, run, toast, val, table, bars, spark, donut, hbars, statusPill, expPill, itemOptions, partnerOptions, chatter, tabs, searchBox, match, barcode, TG } = U;
+const { esc, tx, fm, fm0, kgf, qtyf, pct, df, tf, packName, toG, toP, toI, canCost, isOwner, ic, PAGES, ACTS, page, modal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, chatter, tabs, searchBox, match, barcode, TG } = U;
 const money = p => `${fm0(p)} <em>ج</em>`;
 const sumBy = (arr, f) => arr.reduce((s, x) => s + f(x), 0);
 
 /* ========== OVERVIEW ========== */
+let HOME_DAYS = 14;
+ACTS['home-days'] = n => { HOME_DAYS = +n; U.render(); };
 PAGES.home = () => {
   const s = S(), t = E.today(), ms = E.monthStart(t), cost = canCost();
   const inv = s.docs.invoices;
@@ -30,16 +32,23 @@ PAGES.home = () => {
   const greet = h < 12 ? 'صباح الخير' : 'مساء الخير';
   const quick = U.quickFor();
   // KPI rows: money first (owner/accountant), operations second
+  const isLM = E.incomeStatement({ from: lmStart, to: lmSame });
+  const dl = (a, b) => { if (!b) return ''; const c = (a - b) / Math.abs(b) * 100; return `<span class="delta ${c >= 0 ? 'up' : 'dn'}">${c >= 0 ? '▲' : '▼'} ${Math.abs(c).toFixed(1)}%</span>`; };
+  // monthly target: average day of the last 30 days × days in this month, +10%, rounded up to 10,000 EGP
+  const d30 = Array.from({ length: 30 }, (_, i) => E.addDays(t, -i)), avgDay = sumBy(inv.filter(v => d30.includes(v.date)), v => v.net) / 30;
+  const dim = new Date(+t.slice(0, 4), +t.slice(5, 7), 0).getDate();
+  const target = s.settings.salesTarget || Math.ceil(avgDay * dim * 1.1 / 1000000) * 1000000, dayTarget = Math.round(target / dim);
+  const tp = target ? salesM / target : 0;
   const k1 = cost ? [
-    `<div class="kpi main"><small>مبيعات الشهر</small><b>${money(salesM)}</b><span class="t">${ch == null ? 'قبل الضريبة' : `${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(1)}% عن نفس الفترة اللي فاتت`}</span>${spark(daily.map(d => d.w + d.r))}</div>`,
-    `<div class="kpi"><small>مجمل الربح الشهر</small><b>${money(is.gross)}</b><span class="t ${is.gross >= 0 ? 'up' : 'dn'}">هامش ${pct(is.gross, is.revenue)}</span></div>`,
-    `<div class="kpi"><small>صافي الربح الشهر</small><b style="color:var(--${is.net >= 0 ? 'ok' : 'bad'})">${money(is.net)}</b><span class="t">بعد كل المصروفات</span></div>`,
-    `<div class="kpi"><small>قيمة المخزون</small><b>${money(stockV)}</b><span class="t ${low.length ? 'w' : ''}">${low.length ? low.length + ' صنف قرب يخلص' : 'كل الأصناف فوق الحد'}</span></div>`,
+    `<div class="kpi main"><div class="ic">${ic('chart')}</div><small>مبيعات الشهر</small><b>${money(salesM)}</b><span class="t">${ch == null ? 'قبل الضريبة' : `${dl(salesM, salesLM)} عن نفس الفترة اللي فاتت`}</span><div class="goalbar" title="${Math.round(tp * 100)}%"><i style="width:${Math.min(100, tp * 100)}%"></i></div><span class="t">${Math.round(tp * 100)}% من هدف الشهر ${fm0(target)} ج</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('tag')}</div><small>مجمل الربح الشهر</small><b>${money(is.gross)}</b><span class="t">${dl(is.gross, isLM.gross)} هامش ${pct(is.gross, is.revenue)}</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('cash')}</div><small>صافي الربح الشهر</small><b style="color:var(--${is.net >= 0 ? 'ok' : 'bad'});-webkit-text-fill-color:var(--${is.net >= 0 ? 'ok' : 'bad'})">${money(is.net)}</b><span class="t">${dl(is.net, isLM.net)} بعد كل المصروفات</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('box')}</div><small>قيمة المخزون</small><b>${money(stockV)}</b><span class="t ${low.length ? 'w' : ''}">${low.length ? low.length + ' صنف قرب يخلص' : 'كل الأصناف فوق الحد'}</span></div>`,
   ] : [
-    `<div class="kpi main"><small>تشغيلات جارية</small><b>${open.length}</b><span class="t">${s.docs.batches.filter(b => b.date === t).length} اتفتحت النهارده</span></div>`,
-    `<div class="kpi"><small>إنتاج الشهر</small><b>${kgf(outKg)} <em>كجم</em></b><span class="t">${bM.length} تشغيلة</span></div>`,
-    `<div class="kpi"><small>هدر الإنتاج</small><b>${pct(inKg - outKg, inKg)}</b><span class="t">${kgf(inKg - outKg)} كجم الشهر ده</span></div>`,
-    `<div class="kpi"><small>أصناف قربت تخلص</small><b>${low.length}</b><span class="t ${exp.length ? 'w' : ''}">${exp.length} دفعة صلاحيتها قربت</span></div>`,
+    `<div class="kpi main"><div class="ic">${ic('batch')}</div><small>تشغيلات جارية</small><b>${open.length}</b><span class="t">${s.docs.batches.filter(b => b.date === t).length} اتفتحت النهارده</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('box')}</div><small>إنتاج الشهر</small><b>${kgf(outKg)} <em>كجم</em></b><span class="t">${bM.length} تشغيلة</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('knife')}</div><small>هدر الإنتاج</small><b>${pct(inKg - outKg, inKg)}</b><span class="t">${kgf(inKg - outKg)} كجم الشهر ده</span></div>`,
+    `<div class="kpi"><div class="ic">${ic('bell')}</div><small>أصناف قربت تخلص</small><b>${low.length}</b><span class="t ${exp.length ? 'w' : ''}">${exp.length} دفعة صلاحيتها قربت</span></div>`,
   ];
   const k2 = cost ? [
     `<div class="kpi sm"><small>مبيعات النهارده</small><b>${money(sumBy(invT, v => v.net))}</b><span class="t">${invT.length} فاتورة</span></div>`,
@@ -49,20 +58,34 @@ PAGES.home = () => {
   ] : [];
   const reqN = U.pendingRequests ? U.pendingRequests() : 0;
   const alertsList = [...(reqN ? [{ level: 'info', text: `${reqN} طلب حساب جديد مستني موافقتك`, go: 'users' }] : []), ...pend.map(c => ({ level: 'info', text: `طلب تصحيح ${c.no} مستني موافقة المالك`, go: 'batch/' + c.batchId })), ...low.map(a => ({ level: a.level, text: a.text, go: 'stock' })), ...exp.map(a => ({ level: a.level, text: a.text, go: 'stock' }))];
-  const byWh = E.WAREHOUSES.map(w => ({ label: w.name, v: sumBy(s.lots.filter(l => l.wh === w.id && l.qty > 0 && E.item(l.itemId).unit === 'kg'), l => l.qty) }));
+  const byWh = E.warehouses().map(w => ({ label: w.name, v: sumBy(s.lots.filter(l => l.wh === w.id && l.qty > 0 && E.item(l.itemId).unit === 'kg'), l => l.qty) }));
   const custMix = [['wholesale', 'مطاعم ومحلات (جملة)', '#D2452F'], ['retail', 'أفراد (قطاعي)', '#F2B33D']].map(([k, l, c]) => ({ label: l, v: sumBy(invM.filter(v => v.kind === k), v => v.net), c }));
   const prodSales = {}; invM.forEach(v => v.lines.forEach(l => { prodSales[l.productId] = (prodSales[l.productId] || 0) + l.qty; }));
   const topProd = Object.entries(prodSales).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id, q]) => ({ label: E.item(id).name, v: q }));
   const lastB = s.docs.batches.filter(b => b.status === 'closed').slice(-12).reverse();
+  const sales = Array.from({ length: HOME_DAYS }, (_, i) => E.addDays(t, i - HOME_DAYS + 1)).map(d => ({ label: df(d).split(' ')[0], v: sumBy(inv.filter(v => v.date === d), v => v.net) }));
+  const CASH = ['1101', '1102', '1103'], cashNow = CASH.reduce((a, c) => a + E.bal(L, c), 0);
+  const cashDelta = {}; s.journal.forEach(j => j.lines.forEach(l => { if (CASH.includes(l.acc)) cashDelta[j.date] = (cashDelta[j.date] || 0) + l.dr - l.cr; }));
+  const cashSeries = []; { let run = cashNow; for (let i = 0; i < 14; i++) { const d = E.addDays(t, -i); cashSeries.unshift(run); run -= cashDelta[d] || 0; } }
   page('نظرة عامة', `
-    <div class="card hero"><div><h2>${greet}، ${esc(E.me().name)}</h2><p>${U.dfl(t)} · النهارده ${fm0(sumBy(invT, v => v.total))} ج من ${invT.length} فاتورة · ${open.length} تشغيلة جارية · ${alertsList.length} تنبيه</p></div><span class="grow"></span>
+    <div class="card hero"><button class="me-btn" data-act="me" aria-label="حسابي">${U.avatar(E.me(), 'hero-av')}</button><div style="min-width:0"><h2>${greet}، ${esc(E.me().name)}</h2><p>${U.dfl(t)}</p>
+      <div class="chips"><span class="chip"><b>${fm0(sumBy(invT, v => v.total))} ج</b> مبيعات النهارده</span><span class="chip"><b>${invT.length}</b> فاتورة</span><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
       ${cost ? `<span data-go="reports" class="pill ${allOk ? 'ok' : 'bad'}" role="button" tabindex="0" style="cursor:pointer">${allOk ? '✓ الحسابات متوازنة والمخزون مطابق' : '✗ فيه فرق في الحسابات'}</span>` : ''}</div>
     ${quick.length ? `<div class="qas">${quick.map((q, i) => `<button class="qa ${i % 2 ? 'y' : ''}" data-act="quick" data-arg="${q[0]}"><i>${ic(q[3])}</i><span><b>${q[1]}</b><small>${q[2]}</small></span></button>`).join('')}</div>` : ''}
     <div class="sec-title"><h2>${cost ? 'الأرقام' : 'الإنتاج'}</h2></div>
     <div class="kpis">${k1.join('')}</div>${k2.length ? `<div class="kpis">${k2.join('')}</div>` : ''}
-    <div class="sec-title"><h2>المبيعات والتنبيهات</h2></div>
+    ${cost ? `<div class="sec-title"><h2>المبيعات مقابل الهدف</h2></div>
     <div class="grid g-main">
-      <div class="card"><div class="hd"><h3>المبيعات آخر ١٤ يوم</h3><span class="sub">صافي قبل الضريبة</span><div class="tools legend"><span><i style="background:#D2452F"></i>جملة</span><span><i style="background:#F2B33D"></i>قطاعي</span></div></div>
+      <div class="card"><div class="hd"><h3>المبيعات اليومية</h3><span class="sub">صافي قبل الضريبة · الخط المتقطع هدف اليوم</span><div class="tools"><div class="seg" role="tablist">${[7, 14, 30].map(n => `<button class="${HOME_DAYS === n ? 'on' : ''}" data-act="home-days" data-arg="${n}" role="tab" aria-selected="${HOME_DAYS === n}">${n} يوم</button>`).join('')}</div></div></div>
+        <div class="bd">${lolli(sales, { target: dayTarget, fmt: v => fm0(v) + ' ج' })}<div class="chips" style="margin-top:10px"><span class="chip"><b>${sales.filter(d => d.v >= dayTarget).length}</b> يوم وصل للهدف من ${HOME_DAYS}</span><span class="chip"><b>${fm0(sumBy(sales, d => d.v))} ج</b> إجمالي الفترة</span><span class="chip"><b>${fm0(Math.max(...sales.map(d => d.v)))} ج</b> أعلى يوم</span></div></div></div>
+      <div style="display:grid;gap:16px;align-content:start">
+        <div class="card"><div class="hd"><h3>هدف الشهر</h3><span class="sub">${s.settings.salesTarget ? 'متحدد في الإعدادات' : 'متوسط آخر ٣٠ يوم +١٠٪'}</span></div><div class="bd gauge-card">${ring(tp, { size: 132, sw: 13, label: Math.round(tp * 100) + '%', sub: 'من الهدف' })}<div class="g-side"><div><small>اتباع لحد دلوقتي</small><b>${fm0(salesM)} ج</b></div><div><small>فاضل</small><b>${fm0(Math.max(0, target - salesM))} ج</b></div><div><small>المطلوب في اليوم</small><b>${fm0(Math.max(0, target - salesM) / Math.max(1, dim - +t.slice(8) + 1))} ج</b></div></div></div></div>
+        <div class="card"><div class="hd"><h3>الخزنة والبنك</h3><span class="sub">آخر ١٤ يوم</span><div class="tools"><button class="btn sm" data-go="treasury">التفاصيل</button></div></div><div class="bd"><b style="font:800 26px var(--head)">${fm0(cashNow)} <em style="font-size:14px;color:var(--muted)">ج</em></b><div class="chips" style="margin:6px 0 4px">${[['1101', 'خزنة'], ['1102', 'بنك'], ['1103', 'إنستاباي']].map(([c, n]) => `<span class="chip">${n} <b>${fm0(E.bal(L, c))}</b></span>`).join('')}</div>${area(cashSeries)}</div></div>
+      </div>
+    </div>` : ''}
+    <div class="sec-title"><h2>${cost ? 'التنبيهات وتوزيع المبيعات' : 'المبيعات والتنبيهات'}</h2></div>
+    <div class="grid g-main">
+      <div class="card"><div class="hd"><h3>المبيعات آخر ١٤ يوم</h3><span class="sub">جملة وقطاعي</span><div class="tools legend"><span><i style="background:#D2452F"></i>جملة</span><span><i style="background:#F2B33D"></i>قطاعي</span></div></div>
         <div class="bd">${bars(daily.map(d => ({ label: d.label, v: d.w, v2: d.r, top: d.w + d.r ? Math.round((d.w + d.r) / 100000) + 'k' : '' })), { color: '#D2452F', stack: '#F2B33D', fmt: v => fm0(v) + ' ج' })}</div></div>
       <div class="card"><div class="hd"><h3>محتاج انتباهك</h3><div class="tools"><button class="btn sm" data-go="alerts">كل التنبيهات</button></div></div><div class="bd"><div class="list">
         ${alertsList.slice(0, 8).map(a => `<div class="li" data-go="${a.go}" style="cursor:pointer"><span class="d" style="background:var(--${a.level === 'bad' ? 'bad' : a.level === 'warn' ? 'warn' : 'info'})"></span><div class="x">${tx(a.text)}</div></div>`).join('') || '<div class="empty">كله تمام، مفيش تنبيهات</div>'}
@@ -85,7 +108,7 @@ PAGES.home = () => {
 PAGES.flow = () => {
   const s = S(), t = E.today(), ms = E.monthStart(t);
   const L = E.ledger({});
-  const wh = w => s.lots.filter(l => l.wh === w && l.qty > 0);
+  const whAll = use => s.lots.filter(l => E.whUse(l.wh) === use && l.qty > 0);
   const kgOf = lots => sumBy(lots.filter(l => E.item(l.itemId).unit === 'kg'), l => l.qty);
   const vOf = lots => sumBy(lots, l => l.value);
   const pM = s.docs.purchases.filter(p => p.date >= ms), cM = s.docs.cuttings.filter(c => c.date >= ms);
@@ -97,12 +120,12 @@ PAGES.flow = () => {
   const stages = [
     st('suppliers', 'الموردين', `${s.partners.filter(p => p.type === 'supplier').length} مورد`, 'لحوم · توابل · أكياس · استيكرات', 'مستحق لهم: ' + fm0(E.bal(L, '2101')) + ' ج', 'المحاسب'),
     st('purchases', 'الاستلام بالباركود', `${pM.length} فاتورة`, `الشهر ده · ${fm0(sumBy(pM, p => p.total))} ج`, 'من: المخزون · إلى: المورد', 'أمين المخزن'),
-    st('stock', 'مخزن الاستلام', `${kgf(kgOf(wh('W1')))} كجم`, 'كل دفعة: إنتاج · دخول · صلاحية', '', 'أمين المخزن'),
+    st('stock', 'مخزن الاستلام', `${kgf(kgOf(whAll('receiving')))} كجم`, 'كل دفعة: إنتاج · دخول · صلاحية', '', 'أمين المخزن'),
     st('cutting', 'التقطيع', `${cM.length} عملية`, `الشهر ده · هدر ${kgf(sumBy(cM, c => c.waste))} كجم`, 'التكلفة تتوزع بالقيمة البيعية', 'مشرف الإنتاج'),
-    st('stock', 'تلاجة الإنتاج', `${kgf(kgOf(wh('W2')))} كجم`, cost ? `قيمتها ${fm0(vOf(wh('W2')))} ج` : 'لحوم وتوابل', '', 'أمين المخزن'),
+    st('stock', `تلاجات الإنتاج (${E.whs('raw').length})`, `${kgf(kgOf(whAll('raw')))} كجم`, cost ? `قيمتها ${fm0(vOf(whAll('raw')))} ج` : 'لحوم وتوابل', '', 'أمين المخزن'),
     st('worker', 'الصرف على التشغيلة', `${bOpen.length} جارية`, `حد التنبيه ${s.settings.issueLimitKg} كجم للصنف`, 'من: تحت التشغيل · إلى: الخامات', 'العامل من التابلت'),
     st('batches', 'قفل التشغيلة والتعبئة', `${bM.length} تشغيلة`, `الشهر ده · ${kgf(sumBy(bM, b => b.output))} كجم`, 'من: المنتج التام · إلى: تحت التشغيل', 'مشرف الإنتاج'),
-    st('stock', 'فريزر المنتج التام', `${kgf(kgOf(wh('W4')))} كجم`, 'عبوات ½ لحد ٢.٥ كيلو', cost ? 'قيمته ' + fm0(E.bal(L, '1305')) + ' ج' : '', 'أمين المخزن'),
+    st('stock', `فريزرات المنتج التام (${E.whs('fg').length})`, `${kgf(kgOf(whAll('fg')))} كجم`, 'عبوات ½ لحد ٢.٥ كيلو', cost ? 'قيمته ' + fm0(E.bal(L, '1305')) + ' ج' : '', 'أمين المخزن'),
     st('invoices', 'الفاتورة', `${vM.length} فاتورة`, `الشهر ده · ${fm0(sumBy(vM, v => v.total))} ج`, 'العميل / المبيعات + الضريبة · تكلفة المبيعات / المنتج التام', 'المبيعات'),
     st('customers', 'التحصيل', `${fm0(E.bal(L, '1201'))} ج`, 'مديونيات العملاء الآجل', 'من: الخزنة/البنك · إلى: العميل', 'المحاسب'),
     st('reports', 'القوائم المالية', ok ? '✓ متوازنة' : '✗ فيه فرق', 'دخل · ميزانية · تشغيل ومتاجرة', '', 'المالك والمحاسب'),
@@ -125,7 +148,7 @@ PAGES.flow = () => {
       <div class="card"><div class="hd"><h3>راح لمين</h3><span class="sub">الفواتير اللي اتباع فيها</span></div><div class="bd"><div class="list">${downs.map(d => `<div class="li" data-go="invoice/${d.v.id}" style="cursor:pointer"><span class="d" style="background:var(--ok)"></span><div class="x"><b>${esc(E.partner(d.v.customerId).name)}</b><small class="mono">${esc(d.v.no)} · ${df(d.v.date)}</small></div><b class="num">${kgf(d.q)} كجم</b></div>`).join('') || '<div class="empty">لسه متباعش منها حاجة</div>'}</div></div></div>
     </div>`;
   }
-  page('الورك فلو والتتبع', `
+  page('مسار البضاعة', `
     <div class="note info">المسار كامل من المورد للفاتورة بأرقام حية. كل مرحلة بتعمل قيدها المحاسبي لوحدها، ودوس على أي مرحلة تفتح شاشتها.</div>
     <div class="flow">${stages.join('')}</div>
     <div class="card"><div class="hd"><h3>تتبع تشغيلة من المورد للعميل</h3><div class="tools"><select class="f" id="trace-b" style="width:auto">${closed.slice().reverse().map(b => `<option value="${b.id}" ${tb && b.id === tb.id ? 'selected' : ''}>${esc(b.no)} · ${esc(E.item(b.productId).name)} · ${df(b.closeDate)}</option>`).join('')}</select></div></div><div class="bd">${trace}</div></div>`);
@@ -231,7 +254,7 @@ PAGES.batch = id => {
         ${hbars(Object.entries(totals).filter(([iid]) => E.item(iid).unit === 'kg').map(([iid, q]) => ({ label: E.item(iid).name, v: q, c: q > lim ? 'var(--bad)' : 'var(--red)' })), v => kgf(v) + ' كجم')}
       </div></div>
     </div>
-    ${b.status === 'closed' ? `<div class="card"><div class="hd"><h3>العبوات الناتجة</h3><span class="sub">دخلت فريزر المنتج التام</span></div><div class="bd">${table('bpk', [{ t: 'العبوة', f: l => packName(l.packSize) }, { t: 'الدفعة', f: l => `<span class="mono">${esc(l.code)}</span>` }, { t: 'العدد الأصلي', n: 1, f: l => l.inQty / l.packSize }, { t: 'المتبقي', n: 1, f: l => l.qty / l.packSize }, ...(cost ? [{ t: 'تكلفة العبوة', n: 1, f: l => fm(Math.round(l.inValue / (l.inQty / l.packSize))) }] : []), { t: 'الصلاحية', f: l => df(l.expDate) }], s.lots.filter(l => l.batchId === b.id && l.src.type === 'batch'))}</div></div>` : ''}
+    ${b.status === 'closed' ? `<div class="card"><div class="hd"><h3>العبوات الناتجة</h3><span class="sub">اتوزعت على الفريزرات</span></div><div class="bd">${table('bpk', [{ t: 'العبوة', f: l => packName(l.packSize) }, { t: 'الفريزر', f: l => `<b>${esc(E.whName(l.wh))}</b>` }, { t: 'الدفعة', f: l => `<span class="mono">${esc(l.code)}</span>` }, { t: 'العدد الأصلي', n: 1, f: l => l.inQty / l.packSize }, { t: 'المتبقي', n: 1, f: l => l.qty / l.packSize }, ...(cost ? [{ t: 'تكلفة العبوة', n: 1, f: l => fm(Math.round(l.inValue / (l.inQty / l.packSize))) }] : []), { t: 'الصلاحية', f: l => df(l.expDate) }], s.lots.filter(l => l.batchId === b.id && l.src.type === 'batch'))}</div></div>` : ''}
     <div class="card"><div class="hd"><h3>سجل التشغيلة</h3></div><div class="bd">${chatter(b.no)}</div></div></div>`, { crumb: '<a href="#batches">التشغيلات</a> / ' + esc(b.no) });
 };
 ACTS['corr-ok'] = id => run(() => E.decideCorrection(id, true), 'اتوافق على التصحيح');
@@ -244,7 +267,7 @@ ACTS['corr-req'] = arg => {
   { saveText: 'إرسال للمالك', save: async () => { await E.requestCorrection({ batchId: bid, issueId: iid, newQty: it.unit === 'kg' ? toG(val('cr-q')) : toI(val('cr-q')), reason: val('cr-r') }); toast('اتبعت للمالك', 'ok'); } });
 };
 function issueForm(bid) {
-  return `<div class="fgrid"><label class="fld"><span>الصنف (من تلاجة الإنتاج)</span><select class="f" id="is-i">${S().items.filter(i => ['meat', 'spice'].includes(i.cat)).map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${kgf(E.available(i.id, ['W2']))} كجم</option>`).join('')}</select></label>
+  return `<div class="fgrid"><label class="fld"><span>الصنف (من تلاجات الإنتاج)</span><select class="f" id="is-i">${S().items.filter(i => ['meat', 'spice'].includes(i.cat)).map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${kgf(E.available(i.id, E.whs('raw')))} كجم</option>`).join('')}</select></label>
     <label class="fld"><span>الكمية (كجم)</span><input class="f" id="is-q" type="number" min="0.1" step="0.1"></label></div>
     <div class="note">بعد التأكيد السطر بيتقفل ومينفعش يتعدل. الأكياس والاستيكرات بتتصرف تلقائي عند القفل.</div>`;
 }
@@ -254,12 +277,21 @@ ACTS['b-close'] = bid => {
   const inKg = sumBy(b.issues.filter(i => !i.reversed && E.item(i.itemId).unit === 'kg' && E.item(i.itemId).cat !== 'pack'), i => i.qty);
   const sizes = E.packsOf(E.item(b.productId));
   const bags = sizes.map(sz => S().items.find(i => i.packFor === sz));
-  modal(`قفل ${esc(b.no)}`, `<div class="note info">الخامات المصروفة: <b>${kgf(inKg)} كجم</b>. سجل عدد العبوات من كل حجم، والسيستم يحسب الناتج والهدر ويصرف الأكياس والاستيكرات تلقائي.</div>
-    <div class="fgrid">${sizes.map((sz, k) => `<label class="fld"><span>عبوة ${packName(sz)} <small>(متاح ${bags[k] ? E.available(bags[k].id, ['W3']) : 0} كيس)</small></span><input class="f pk" data-sz="${sz}" type="number" min="0" step="1" value="0"></label>`).join('')}
-      <label class="fld"><span>تاريخ القفل</span><input class="f" id="cl-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
+  const fz = E.warehouses().filter(w => w.use === 'fg');
+  const grid = `<div class="tw"><table class="t split"><thead><tr><th>العبوة</th>${fz.map(w => `<th class="n">${esc(w.name)}</th>`).join('')}<th class="n">الإجمالي</th></tr></thead><tbody>
+    ${sizes.map((sz, k) => `<tr><td><b>${packName(sz)}</b><div class="crumb">متاح ${bags[k] ? E.available(bags[k].id, E.whs('pack')) : 0} كيس</div></td>${fz.map(w => `<td class="n"><input class="f pk" data-sz="${sz}" data-wh="${w.id}" type="number" min="0" step="1" value="0" style="width:90px"></td>`).join('')}<td class="n"><b class="pk-tot" data-sz="${sz}">0</b></td></tr>`).join('')}
+  </tbody></table></div>`;
+  modal(`قفل ${esc(b.no)}`, `<div class="note info">الخامات المصروفة: <b>${kgf(inKg)} كجم</b>. اكتب عدد العبوات من كل حجم <b>في كل فريزر</b>، والسيستم يحسب الناتج والهدر ويصرف الأكياس والاستيكرات تلقائي.</div>
+    ${grid}<label class="fld" style="max-width:220px"><span>تاريخ القفل</span><input class="f" id="cl-d" type="date" value="${E.today()}" max="${E.today()}"></label>
     <div class="smart"><div><small>الناتج</small><b id="cl-out">0 كجم</b></div><div><small>الهدر</small><b id="cl-w">—</b></div><div><small>عدد العبوات</small><b id="cl-n">0</b></div></div>`,
-  { wide: true, saveText: 'قفل التشغيلة', save: async () => { const packs = {}; document.querySelectorAll('.pk').forEach(el => { packs[el.dataset.sz] = toI(el.value || '0'); }); const r = await E.closeBatch({ batchId: bid, date: val('cl-d'), packs }); toast(`اتقفلت ${r.no}: ${kgf(r.output)} كجم`, 'ok'); } });
-  const upd = () => { let out = 0, n = 0; document.querySelectorAll('.pk').forEach(el => { const c = toI(el.value || '0') || 0; out += c * +el.dataset.sz; n += c; }); document.getElementById('cl-out').textContent = kgf(out) + ' كجم'; document.getElementById('cl-n').textContent = n; const w = inKg - out; const el = document.getElementById('cl-w'); el.textContent = w < 0 ? 'الناتج أكبر من الخامات!' : `${kgf(w)} كجم · ${pct(w, inKg)}`; el.style.color = w < 0 ? 'var(--bad)' : ''; };
+  { wide: true, saveText: 'قفل التشغيلة', save: async () => {
+    const packs = {}, split = fz.map(w => ({ wh: w.id, packs: {} }));
+    document.querySelectorAll('.pk').forEach(el => { const n = toI(el.value || '0') || 0; const z = +el.dataset.sz; packs[z] = (packs[z] || 0) + n; split.find(d => d.wh === el.dataset.wh).packs[z] = n; });
+    const r = await E.closeBatch({ batchId: bid, date: val('cl-d'), packs, split }); toast(`اتقفلت ${r.no}: ${kgf(r.output)} كجم`, 'ok');
+  } });
+  const upd = () => { let out = 0, n = 0; const per = {}; document.querySelectorAll('.pk').forEach(el => { const c = toI(el.value || '0') || 0; out += c * +el.dataset.sz; n += c; per[el.dataset.sz] = (per[el.dataset.sz] || 0) + c; });
+    document.querySelectorAll('.pk-tot').forEach(el => { el.textContent = per[el.dataset.sz] || 0; });
+    document.getElementById('cl-out').textContent = kgf(out) + ' كجم'; document.getElementById('cl-n').textContent = n; const w = inKg - out; const el = document.getElementById('cl-w'); el.textContent = w < 0 ? 'الناتج أكبر من الخامات!' : `${kgf(w)} كجم · ${pct(w, inKg)}`; el.style.color = w < 0 ? 'var(--bad)' : ''; };
   document.querySelectorAll('.pk').forEach(el => { el.oninput = upd; });
 };
 
@@ -277,9 +309,9 @@ PAGES.worker = () => {
     const it = WK.item && E.item(WK.item);
     const g = toG(WK.qty || '0') || 0;
     const already = it ? E.issuedOf(b, it.id) : 0;
-    const av = it ? E.available(it.id, ['W2']) : 0;
+    const av = it ? E.available(it.id, E.whs('raw')) : 0;
     right = `<div class="card"><div class="hd"><h3>٢. اختار الصنف</h3><div class="tools seg"><button class="${WK.cat === 'meat' ? 'on' : ''}" data-act="wk-cat" data-arg="meat">لحوم</button><button class="${WK.cat === 'spice' ? 'on' : ''}" data-act="wk-cat" data-arg="spice">توابل وإضافات</button></div></div><div class="bd"><div class="wk-items">
-      ${items.map(i => { const a = E.available(i.id, ['W2']); return `<button class="wk-i ${WK.item === i.id ? 'on' : ''}" data-act="wk-item" data-arg="${i.id}" ${a ? '' : 'disabled'}><b>${esc(i.name)}</b><small>متاح ${kgf(a)} كجم</small>${E.issuedOf(b, i.id) ? `<small style="color:var(--red)">اتصرف ${kgf(E.issuedOf(b, i.id))} كجم</small>` : ''}</button>`; }).join('')}</div></div></div>
+      ${items.map(i => { const a = E.available(i.id, E.whs('raw')); return `<button class="wk-i ${WK.item === i.id ? 'on' : ''}" data-act="wk-item" data-arg="${i.id}" ${a ? '' : 'disabled'}><b>${esc(i.name)}</b><small>متاح ${kgf(a)} كجم</small>${E.issuedOf(b, i.id) ? `<small style="color:var(--red)">اتصرف ${kgf(E.issuedOf(b, i.id))} كجم</small>` : ''}</button>`; }).join('')}</div></div></div>
     ${it ? `<div class="card"><div class="hd"><h3>٣. الكمية بالكيلو: ${esc(it.name)}</h3></div><div class="bd" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
       <div style="display:flex;flex-direction:column;gap:10px"><div class="wk-qty" id="wk-qty">${esc(WK.qty || '0')}</div>
       <div class="pad">${['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '⌫'].map(k => `<button data-act="wk-key" data-arg="${k}">${k}</button>`).join('')}</div></div>
@@ -337,10 +369,10 @@ ACTS['cut-new'] = () => {
 /* ========== STOCK ========== */
 PAGES.stock = () => {
   const s = S(), cost = canCost();
-  const tb = tabs('st', [['items', 'حسب الصنف'], ['lots', 'الدفعات والصلاحية'], ['wh', 'حسب المكان'], ['tr', 'التحويلات'], ['wo', 'الإعدام والهالك']], 'items');
+  const tb = tabs('st', [['wh', 'التلاجات والمخازن'], ['items', 'حسب الصنف'], ['lots', 'الدفعات والصلاحية'], ['tr', 'التحويلات'], ['wo', 'الإعدام والهالك']], 'wh');
   const cat = U.FILTER.scat || '', wh = U.FILTER.swh || '';
   const catSel = `<select class="f" id="s-cat" style="width:auto"><option value="">كل الأنواع</option>${Object.entries(E.CAT_NAME).map(([k, n]) => `<option value="${k}" ${cat === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
-  const whSel = `<select class="f" id="s-wh" style="width:auto"><option value="">كل الأماكن</option>${E.WAREHOUSES.map(w => `<option value="${w.id}" ${wh === w.id ? 'selected' : ''}>${w.name}</option>`).join('')}</select>`;
+  const whSel = `<select class="f" id="s-wh" style="width:auto"><option value="">كل الأماكن</option>${E.warehouses().map(w => `<option value="${w.id}" ${wh === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>`;
   let body = '', bar = '';
   const canMove = ['owner', 'storekeeper', 'supervisor'].includes(U.role()), canWO = ['owner', 'storekeeper'].includes(U.role());
   if (tb.cur === 'items') {
@@ -357,12 +389,27 @@ PAGES.stock = () => {
       { t: 'الرصيد', n: 1, f: l => `<b>${qtyf(l.qty, E.item(l.itemId).unit)}</b>${l.packSize ? ` <small>(${l.qty / l.packSize} عبوة)</small>` : ''}` }, { t: 'إنتاج', f: l => df(l.prodDate) }, { t: 'دخول', f: l => df(l.inDate) }, { t: 'صلاحية', f: l => `${df(l.expDate)} ${expPill(l.expDate)}` },
       { t: 'المصدر', f: l => `<span class="mono">${esc(l.src.no)}</span>` }];
     if (cost) cols.push({ t: 'القيمة', n: 1, f: l => fm(l.value) });
-    cols.push({ t: '', f: l => `<button class="btn sm" data-act="lbl" data-arg="${l.id}">باركود</button>${canMove && l.wh !== 'W4' ? ` <button class="btn sm" data-act="tr-new" data-arg="${l.id}">تحويل</button>` : ''}${canWO ? ` <button class="btn sm dan" data-act="wo-new" data-arg="${l.id}">إعدام</button>` : ''}` });
+    cols.push({ t: '', f: l => `<button class="btn sm" data-act="lbl" data-arg="${l.id}">باركود</button>${canMove ? ` <button class="btn sm" data-act="tr-new" data-arg="${l.id}">تحويل</button>` : ''}${canWO ? ` <button class="btn sm dan" data-act="wo-new" data-arg="${l.id}">إعدام</button>` : ''}` });
     bar = catSel + whSel + searchBox('sq', 'ابحث برقم الدفعة أو الصنف');
     body = table('st-l', cols, rows);
   } else if (tb.cur === 'wh') {
-    body = `<div class="grid g2">${E.WAREHOUSES.map(w => { const ls = s.lots.filter(l => l.wh === w.id && l.qty > 0); const by = {}; ls.forEach(l => { by[l.itemId] = (by[l.itemId] || 0) + l.qty; }); return `<div class="card"><div class="hd"><h3>${w.name}</h3><span class="sub">${ls.length} دفعة${cost ? ' · ' + fm0(sumBy(ls, l => l.value)) + ' ج' : ''}</span></div><div class="bd">${hbars(Object.entries(by).map(([id, q]) => ({ label: E.item(id).name, v: q, u: E.item(id).unit })), v => v >= 1000 ? kgf(v) : v)}</div></div>`; }).join('')}</div>
-      <div class="crumb">الأرقام بالكيلو للحوم والتوابل والمنتج، وبالقطعة للأكياس والاستيكرات.</div>`;
+    const t0 = E.today();
+    const canEditWh = ['owner', 'storekeeper'].includes(U.role());
+    const USE_ICON = { receiving: 'truck', raw: 'box', pack: 'tag', fg: 'batch' };
+    bar = canEditWh ? `<span class="grow"></span><button class="btn p" data-act="wh-edit">${ic('plus')} تلاجة أو فريزر جديد</button>` : '';
+    body = `<div class="fridges">${E.warehouses().map(w => {
+      const ls = s.lots.filter(l => l.wh === w.id && l.qty > 0);
+      const by = {};
+      ls.forEach(l => { const k = l.itemId; const r = by[k] || (by[k] = { it: E.item(k), q: 0, v: 0, lots: 0, batches: new Set(), soon: 0, packs: {} }); r.q += l.qty; r.v += l.value; r.lots++; if (l.src.type === 'batch') r.batches.add(l.src.no); if (E.daysBetween(t0, l.expDate) <= (l.cat === 'product' ? 14 : 3)) r.soon++; if (l.packSize) r.packs[l.packSize] = (r.packs[l.packSize] || 0) + l.qty / l.packSize; });
+      const rows = Object.values(by).sort((x, y) => y.q - x.q);
+      const kgTot = sumBy(rows.filter(r => r.it.unit === 'kg'), r => r.q), vTot = sumBy(rows, r => r.v), soon = sumBy(rows, r => r.soon);
+      return `<section class="card fridge f-${w.use}"><div class="hd"><span class="fr-ic">${ic(USE_ICON[w.use] || 'box')}</span><div><h3>${esc(w.name)}</h3><span class="sub">${E.WH_USE[w.use]}</span></div>
+        <div class="tools">${canEditWh ? `<button class="btn sm" data-act="wh-edit" data-arg="${w.id}">تعديل</button>` : ''}</div></div>
+        <div class="bd"><div class="fr-stats"><div><small>الوزن</small><b>${kgf(kgTot)} كجم</b></div><div><small>أصناف</small><b>${rows.length}</b></div><div><small>دفعات</small><b>${ls.length}</b></div>${cost ? `<div><small>القيمة</small><b>${fm0(vTot)} ج</b></div>` : ''}${soon ? `<div class="warn"><small>صلاحية قريبة</small><b>${soon}</b></div>` : ''}</div>
+        ${rows.length ? `<div class="tw"><table class="t"><thead><tr><th>الصنف</th><th class="n">الكمية</th>${w.use === 'fg' ? '<th>العبوات</th><th>من تشغيلات</th>' : '<th class="n">دفعات</th>'}${cost ? '<th class="n">القيمة</th>' : ''}</tr></thead><tbody>
+          ${rows.map(r => `<tr><td><b>${esc(r.it.name)}</b>${r.soon ? ' <span class="pill warn">صلاحية قريبة</span>' : ''}</td><td class="n">${qtyf(r.q, r.it.unit)}</td>${w.use === 'fg' ? `<td>${Object.entries(r.packs).map(([z, n]) => `<span class="pill mut">${packName(+z)} × ${n}</span>`).join(' ')}</td><td>${[...r.batches].slice(-4).map(no => `<span class="mono">${esc(no)}</span>`).join('، ')}${r.batches.size > 4 ? ` +${r.batches.size - 4}` : ''}</td>` : `<td class="n">${r.lots}</td>`}${cost ? `<td class="n">${fm(r.v)}</td>` : ''}</tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty">فاضية</div>'}</div></section>`;
+    }).join('')}</div>`;
   } else if (tb.cur === 'tr') {
     body = table('st-t', [{ t: 'الرقم', f: t => `<span class="mono">${esc(t.no)}</span>` }, { t: 'التاريخ', f: t => df(t.date) }, { t: 'الصنف', f: t => esc(E.item(t.itemId).name) }, { t: 'الدفعة', f: t => `<span class="mono">${esc(t.lotCode)}</span>` }, { t: 'الكمية', n: 1, f: t => qtyf(t.qty, E.item(t.itemId).unit) }, { t: 'من', f: t => esc(E.whName(t.from)) }, { t: 'إلى', f: t => esc(E.whName(t.to)) }, { t: 'بواسطة', f: t => esc(E.userName(t.by)) }], s.docs.transfers.slice().reverse());
   } else {
@@ -370,17 +417,43 @@ PAGES.stock = () => {
     body = table('st-w', [{ t: 'الرقم', f: w => `<span class="mono">${esc(w.no)}</span>` }, { t: 'التاريخ', f: w => df(w.date) }, { t: 'الصنف', f: w => esc(E.item(w.itemId).name) }, { t: 'الدفعة', f: w => `<span class="mono">${esc(w.lotCode)}</span>` }, { t: 'الكمية', n: 1, f: w => qtyf(w.qty, E.item(w.itemId).unit) }, ...(cost ? [{ t: 'القيمة', n: 1, f: w => fm(w.value) }] : []), { t: 'السبب', f: w => esc(w.reason) }, { t: 'بواسطة', f: w => esc(E.userName(w.by)) }], rows,
       { foot: cost ? `<tr class="tot"><td colspan="5">الإجمالي</td><td class="n">${fm(sumBy(rows, w => w.value))}</td><td colspan="2"></td></tr>` : '' });
   }
-  page('المخزون والدفعات', `<div class="bar">${tb.html}</div><div class="bar">${bar}</div><div class="card"><div class="bd">${body}</div></div>`);
+  page('المخزون والدفعات', `<div class="bar">${tb.html}</div><div class="bar">${bar}</div>${tb.cur === 'wh' ? body : `<div class="card"><div class="bd">${body}</div></div>`}`);
   const c1 = document.getElementById('s-cat'); if (c1) c1.onchange = e => { U.FILTER.scat = e.target.value; U.render(); };
   const c2 = document.getElementById('s-wh'); if (c2) c2.onchange = e => { U.FILTER.swh = e.target.value; U.render(); };
 };
-function labelHtml(l) { const it = E.item(l.itemId); return `<div class="label"><b>${esc(it.name)}</b><span>${qtyf(l.inQty, it.unit)} · ${esc(E.whName(l.wh))}</span>${U.barcode(l.code)}<span>إنتاج ${esc(l.prodDate)} · دخول ${esc(l.inDate)}</span><b>صلاحية ${esc(l.expDate)}</b></div>`; }
-U.labelHtml = labelHtml;
-ACTS.lbl = id => { const l = S().lots.find(x => x.id === id); modal('ملصق الدفعة', `<div class="labels">${labelHtml(l)}</div>`, { foot: `<button class="btn p" data-act="print">${ic('print')} طباعة</button>` }); };
+ACTS['wh-edit'] = id => {
+  const w = id ? E.warehouses().find(x => x.id === id) : { name: '', use: 'fg' };
+  modal(id ? 'تعديل ' + esc(w.name) : 'تلاجة أو فريزر جديد', `<div class="fgrid"><label class="fld"><span>الاسم</span><input class="f" id="wh-n" value="${esc(w.name)}" placeholder="مثلًا: فريزر ٣"></label>
+    <label class="fld"><span>النوع</span><select class="f" id="wh-u">${Object.entries(E.WH_USE).map(([k, n]) => `<option value="${k}" ${w.use === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+    <div class="note info"><b>تلاجة إنتاج:</b> اللحوم والتوابل اللي بيتصرف منها على التشغيلات. <b>فريزر منتج تام:</b> العبوات الجاهزة، ومنه بيتباع. <b>مخزن استلام:</b> البضاعة أول ما توصل من المورد.</div>`,
+  { save: async () => { await E.saveWarehouse({ id, name: val('wh-n'), use: val('wh-u') }); toast('اتحفظ', 'ok'); } });
+};
+function labelHtml(l, btn) { const it = E.item(l.itemId); return `<div class="label"><b>${esc(it.name)}</b><span>${qtyf(l.inQty, it.unit)} · ${esc(E.whName(l.wh))}</span>${U.barcode(l.code)}<span>إنتاج ${esc(l.prodDate)} · دخول ${esc(l.inDate)}</span><b>صلاحية ${esc(l.expDate)}</b>${btn ? `<button class="btn sm no-print lbl-btn" data-act="lbl" data-arg="${l.id}">${ic('print')} اطبع الملصق ده</button>` : ''}</div>`; }
+// print stickers: each label on its own page, sized for a thermal label printer (60×40 mm)
+function printLabels(list) {
+  const body = list.map(([l, n]) => Array.from({ length: n }, () => `<div class="st">${labelHtml(l)}</div>`).join('')).join('');
+  const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0;opacity:0'; document.body.appendChild(f);
+  const d = f.contentDocument;
+  d.open(); d.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;800&display=swap" rel="stylesheet"><style>
+@page{size:60mm 40mm;margin:0}*{box-sizing:border-box}body{margin:0;font-family:Cairo,sans-serif;color:#000}
+.st{width:60mm;height:40mm;padding:1.6mm 2.2mm;page-break-after:always;break-after:page;overflow:hidden}.st:last-child{page-break-after:auto;break-after:auto}
+.label{display:flex;flex-direction:column;gap:0;font-size:7.5pt;line-height:1.25;height:100%}.label b{font-size:9pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label b:last-child{font-size:8.5pt}
+.label svg{width:100%;height:15mm;margin:.6mm 0}</style></head><body>${body}</body></html>`); d.close();
+  const go = () => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 1500); };
+  (d.fonts ? d.fonts.ready : Promise.resolve()).then(() => setTimeout(go, 150));
+}
+ACTS.lbl = id => { const l = S().lots.find(x => x.id === id), it = E.item(l.itemId);
+  modal('طباعة ملصق الدفعة', `<div class="labels" style="max-width:320px">${labelHtml(l)}</div>
+  <label class="fld" style="margin-top:12px"><span>عدد النسخ</span><input class="f" id="lbl-n" type="number" min="1" max="500" value="1"></label>
+  <div class="note">كل ملصق بيطلع في صفحة لوحده بمقاس ٦٠×٤٠ مم (مقاس طابعة الملصقات).</div>`,
+  { foot: `<button class="btn p" data-act="lbl-go" data-arg="${id}">${ic('print')} اطبع</button>` }); };
+U.printLabels = printLabels;
+ACTS['lbl-go'] = id => { const n = Math.max(1, Math.min(500, toI(val('lbl-n')) || 1)); printLabels([[S().lots.find(x => x.id === id), n]]); };
+ACTS['lbl-all'] = pid => { const p = S().docs.purchases.find(x => x.id === pid); printLabels(p.lines.map(l => [S().lots.find(x => x.id === l.lotId), 1])); };
 ACTS['tr-new'] = id => { const l = S().lots.find(x => x.id === id), it = E.item(l.itemId);
   modal('تحويل دفعة', `<div class="note info">${esc(it.name)} · دفعة <b class="mono">${esc(l.code)}</b> · في ${esc(E.whName(l.wh))} · الرصيد ${qtyf(l.qty, it.unit)}</div>
   <div class="fgrid"><label class="fld"><span>الكمية (${it.unit === 'kg' ? 'كجم' : 'قطعة'})</span><input class="f" id="tr-q" type="number" step="${it.unit === 'kg' ? '0.1' : '1'}" value="${it.unit === 'kg' ? l.qty / 1000 : l.qty}"></label>
-  <label class="fld"><span>إلى</span><select class="f" id="tr-to">${E.WAREHOUSES.filter(w => w.id !== l.wh && w.id !== 'W4').map(w => `<option value="${w.id}">${w.name}</option>`).join('')}</select></label>
+  <label class="fld"><span>إلى</span><select class="f" id="tr-to">${E.warehouses().filter(w => w.id !== l.wh && (w.use === 'fg') === (E.whUse(l.wh) === 'fg')).map(w => `<option value="${w.id}">${esc(w.name)} · ${E.WH_USE[w.use]}</option>`).join('')}</select></label>
   <label class="fld"><span>التاريخ</span><input class="f" id="tr-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>`,
   { saveText: 'تحويل', save: async () => { await E.transfer({ date: val('tr-d'), lotId: id, qty: it.unit === 'kg' ? toG(val('tr-q')) : toI(val('tr-q')), toWh: val('tr-to') }); toast('اتحولت', 'ok'); } }); };
 ACTS['wo-new'] = id => { const l = S().lots.find(x => x.id === id), it = E.item(l.itemId);
@@ -405,7 +478,7 @@ PAGES.purchase = id => {
     <div class="card"><div class="bd"><div class="kv"><div><span>المورد</span><b><a href="#supplier/${p.supplierId}">${esc(E.partner(p.supplierId).name)}</a></b></div><div><span>فاتورة المورد</span><b class="mono">${esc(p.ref)}</b></div><div><span>التاريخ</span><b>${df(p.date)}</b></div><div><span>استلم</span><b>${esc(E.userName(p.by))}</b></div><div><span>القيد</span><b class="mono">${esc(p.je)}</b></div></div></div></div>
     <div class="card"><div class="bd">${table('pol', [{ t: 'الصنف', f: l => esc(E.item(l.itemId).name) }, { t: 'الدفعة', f: l => `<span class="mono">${esc(l.lotCode)}</span>` }, { t: 'الكمية', n: 1, f: l => qtyf(l.qty, E.item(l.itemId).unit) }, { t: 'السعر', n: 1, f: l => fm(l.unitCost) }, { t: 'القيمة', n: 1, f: l => fm(l.value) }, { t: 'الضريبة', n: 1, f: l => fm(l.vat) }, { t: 'إنتاج', f: l => df(l.prodDate) }, { t: 'صلاحية', f: l => df(l.expDate) }], p.lines,
       { foot: `<tr class="tot"><td colspan="4">الإجمالي</td><td class="n">${fm(p.net)}</td><td class="n">${fm(p.vat)}</td><td colspan="2" class="n">${fm(p.total)}</td></tr>` })}</div></div>
-    <div class="card"><div class="hd"><h3>ملصقات الباركود</h3><div class="tools"><button class="btn" data-act="print">${ic('print')} طباعة</button></div></div><div class="bd"><div class="labels">${lots.map(labelHtml).join('')}</div></div></div></div>`, { crumb: '<a href="#purchases">المشتريات</a> / ' + esc(p.no) });
+    <div class="card"><div class="hd"><h3>ملصقات الباركود</h3><div class="tools"><button class="btn" data-act="lbl-all" data-arg="${p.id}">${ic('print')} اطبع كل الملصقات</button></div></div><div class="bd"><div class="labels">${lots.map(l => labelHtml(l, true)).join('')}</div></div></div></div>`, { crumb: '<a href="#purchases">المشتريات</a> / ' + esc(p.no) });
 };
 const DEF_EXP = { carcass: 10, meat: 7, spice: 180, pack: 720 };
 const PO = { sup: null, lines: [] };

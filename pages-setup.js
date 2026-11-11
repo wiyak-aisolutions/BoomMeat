@@ -12,7 +12,7 @@ function obLines() {
   const stock = OB.stock.filter(r => r.itemId && r.qty).map(r => {
     const it = E.item(r.itemId), isP = it.cat === 'product';
     const qty = isP ? (toI(r.qty) || 0) * (+r.pack) : it.unit === 'kg' ? toG(r.qty) : toI(r.qty);
-    return { itemId: it.id, qty, unitCost: P(r.cost), expDate: r.exp, packSize: isP ? +r.pack : null, wh: r.wh || 'W2' };
+    return { itemId: it.id, qty, unitCost: P(r.cost), expDate: r.exp, packSize: isP ? +r.pack : null, wh: r.wh || '' };
   });
   return {
     date: OB.date, cash: P(OB.cash), bank: P(OB.bank), instapay: P(OB.instapay),
@@ -50,8 +50,9 @@ PAGES.opening = () => {
     <div class="card"><div class="hd"><h3>٣. جرد المخزون</h3><span class="sub">${OB.stock.length} صنف</span><div class="tools"><button class="btn sm" data-act="ob-fill">املا ٥٠٠ كجم لكل منتج</button><button class="btn sm" data-act="ob-add" data-arg="stock">${ic('plus')} صنف</button></div></div><div class="bd" style="display:flex;flex-direction:column;gap:10px">
       ${OB.stock.map((r, i) => { const it = r.itemId ? E.item(r.itemId) : null; const isP = it && it.cat === 'product'; return row('stock', i, `<label class="fld" style="grid-column:span 2"><span>الصنف</span>${sel('stock', i, 'itemId', '<option value="">اختار</option>' + itemsOpt(r.itemId))}</label>
         ${isP ? `<label class="fld"><span>العبوة</span>${sel('stock', i, 'pack', E.packsOf(it).map(z => `<option value="${z}" ${+r.pack === z ? 'selected' : ''}>${packName(z)}</option>`).join(''))}</label><label class="fld"><span>عدد العبوات</span>${inp('stock', i, 'qty', r.qty, 'type="number" min="0" step="1"')}</label>` : `<label class="fld"><span>الكمية (${it && it.unit === 'pc' ? 'قطعة' : 'كجم'})</span>${inp('stock', i, 'qty', r.qty, 'type="number" min="0" step="0.001"')}</label>`}
+        ${isP ? `<label class="fld"><span>الفريزر</span>${sel('stock', i, 'wh', E.warehouses().filter(w => w.use === 'fg').map(w => `<option value="${w.id}" ${(r.wh || E.whs('fg')[0]) === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join(''))}</label>` : ''}
         <label class="fld"><span>التكلفة (ج لكل ${it && it.unit === 'pc' ? 'قطعة' : 'كجم'})</span>${inp('stock', i, 'cost', r.cost, 'type="number" min="0" step="0.01"')}</label>
-        ${it && ['meat', 'spice', 'carcass'].includes(it.cat) ? `<label class="fld"><span>المكان</span>${sel('stock', i, 'wh', [['W2', 'تلاجة الإنتاج'], ['W1', 'مخزن الاستلام']].map(([w, n]) => `<option value="${w}" ${(r.wh || 'W2') === w ? 'selected' : ''}>${n}</option>`).join(''))}</label>` : ''}
+        ${it && ['meat', 'spice', 'carcass'].includes(it.cat) ? `<label class="fld"><span>المكان</span>${sel('stock', i, 'wh', E.warehouses().filter(w => ['raw', 'receiving'].includes(w.use)).map(w => `<option value="${w.id}" ${(r.wh || E.whs('raw')[0]) === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join(''))}</label>` : ''}
         <label class="fld"><span>الصلاحية</span>${inp('stock', i, 'exp', r.exp, 'type="date"')}</label>`); }).join('') || '<div class="crumb">ضيف كل صنف موجود في المخازن يوم البداية بالكمية وتكلفته.</div>'}</div></div>
     <div class="grid g2">
       <div class="card"><div class="hd"><h3>٤. أرصدة العملاء (ليكم عندهم)</h3><div class="tools"><button class="btn sm" data-act="ob-add" data-arg="cust">${ic('plus')} عميل</button></div></div><div class="bd" style="display:flex;flex-direction:column;gap:10px">
@@ -78,7 +79,7 @@ ACTS['ob-fill'] = () => {
   }
   toast('اتضاف ٥٠٠ كجم لكل منتج. التكلفة مبدئية = ٧٠٪ من سعر الجملة، راجعها قبل الحفظ', 'ok'); U.render();
 };
-ACTS['ob-add'] = k => { OB[k].push(k === 'assets' ? { acc: '1501', rate: '10' } : k === 'stock' ? { wh: 'W2' } : {}); U.render(); };
+ACTS['ob-add'] = k => { OB[k].push(k === 'assets' ? { acc: '1501', rate: '10' } : k === 'stock' ? { wh: '' } : {}); U.render(); };
 ACTS['ob-del'] = arg => { const [k, i] = arg.split(':'); OB[k].splice(+i, 1); U.render(); };
 ACTS['ob-clear'] = () => { Object.assign(OB, { cash: '', bank: '', instapay: '', assets: [], stock: [], cust: [], sup: [] }); U.render(); };
 ACTS['ob-save'] = () => modal('تأكيد القيد الافتتاحي', `<div class="smart">${obSummary()}</div><div class="note">القيد ده بيتسجل مرة واحدة ومينفعش يتمسح. لو فيه غلط بعد كده يتصلح بقيد تسوية من المحاسب.</div>`,

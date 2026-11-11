@@ -34,14 +34,16 @@ PAGES.newinvoice = () => {
   let gross = 0, cst = 0, err = '';
   const prods = s.items.filter(i => i.cat === 'product');
   const lineRows = NI.lines.map((l, k) => {
-    const p = E.item(l.productId); if (!E.packsOf(p).includes(l.packSize)) l.packSize = E.packsOf(p)[0]; const price = E.priceFor(p, c); const n = toI(l.count) || 0;
-    const avail = Math.floor(E.available(p.id, ['W4'], l.packSize) / l.packSize);
+    const p = E.item(l.productId);
+    const inStock = E.packsOf(p).filter(z => E.available(p.id, E.whs('fg'), z) >= z);
+    if (!inStock.includes(l.packSize)) l.packSize = inStock[0] || E.packsOf(p)[0]; const price = E.priceFor(p, c); const n = toI(l.count) || 0;
+    const avail = Math.floor(E.available(p.id, E.whs('fg'), l.packSize) / l.packSize);
     const amt = E.mulDiv(n * l.packSize, price, 1000); gross += amt;
     if (n > avail) err = `${p.name} ${packName(l.packSize)}: المتاح ${avail} عبوة بس`;
     // cost estimate by FIFO without consuming
-    if (canCost() && n) { let need = n * l.packSize; for (const lot of S().lots.filter(x => x.itemId === p.id && x.wh === 'W4' && x.packSize === l.packSize && x.qty > 0).sort((a, b) => a.inDate < b.inDate ? -1 : a.inDate > b.inDate ? 1 : a.n - b.n)) { const t = Math.min(need, lot.qty); cst += t === lot.qty ? lot.value : E.mulDiv(lot.value, t, lot.qty); need -= t; if (!need) break; } }
-    return `<tr><td><select class="f ni-p" data-k="${k}">${prods.map(x => `<option value="${x.id}" ${x.id === l.productId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></td>
-      <td><select class="f ni-s" data-k="${k}">${E.packsOf(p).map(sz => `<option value="${sz}" ${sz === l.packSize ? 'selected' : ''}>${packName(sz)} (${Math.floor(E.available(p.id, ['W4'], sz) / sz)})</option>`).join('')}</select></td>
+    if (canCost() && n) { let need = n * l.packSize; for (const lot of S().lots.filter(x => x.itemId === p.id && E.whUse(x.wh) === 'fg' && x.packSize === l.packSize && x.qty > 0).sort((a, b) => a.inDate < b.inDate ? -1 : a.inDate > b.inDate ? 1 : a.n - b.n)) { const t = Math.min(need, lot.qty); cst += t === lot.qty ? lot.value : E.mulDiv(lot.value, t, lot.qty); need -= t; if (!need) break; } }
+    return `<tr><td><select class="f ni-p" data-k="${k}">${prods.map(x => { const has = E.available(x.id, E.whs('fg')) > 0; return `<option value="${x.id}" ${x.id === l.productId ? 'selected' : ''} ${has || x.id === l.productId ? '' : 'disabled'}>${esc(x.name)}${has ? '' : ' · خلص'}</option>`; }).join('')}</select></td>
+      <td><select class="f ni-s" data-k="${k}">${(inStock.length ? inStock : [l.packSize]).map(sz => `<option value="${sz}" ${sz === l.packSize ? 'selected' : ''}>${packName(sz)} · متاح ${Math.floor(E.available(p.id, E.whs('fg'), sz) / sz)}</option>`).join('')}</select></td>
       <td><input class="f ni-c" data-k="${k}" type="number" min="0" step="1" value="${esc(l.count)}" style="width:90px"></td><td class="n">${kgf(n * l.packSize)} كجم</td><td class="n">${fm(price)}</td><td class="n"><b>${fm(amt)}</b></td>
       <td><button class="btn sm dan" data-act="ni-del" data-arg="${k}" aria-label="حذف السطر">${ic('x')}</button></td></tr>`;
   }).join('');
@@ -53,13 +55,17 @@ PAGES.newinvoice = () => {
       <label class="fld"><span>طريقة الدفع</span><select class="f" id="ni-m">${methodOptions(methods, NI.method)}</select></label>
       <label class="fld"><span>التاريخ</span><input class="f" id="ni-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
     <div class="tw"><table class="t"><thead><tr><th>المنتج</th><th>العبوة (المتاح)</th><th>العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">القيمة</th><th></th></tr></thead><tbody>${lineRows}</tbody></table></div>
-    <div><button class="btn sm" data-act="ni-add">${ic('plus')} سطر جديد</button></div>
+    <button class="add-line" data-act="ni-add">${ic('plus')} إضافة منتج للفاتورة</button>
     <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:space-between;align-items:flex-end">
       <label class="fld" style="max-width:200px"><span>خصم (ج)</span><input class="f" id="ni-x" type="number" min="0" step="1" value="${esc(NI.discount)}"></label>
-      <div class="smart" style="flex:1 1 280px;min-width:0;max-width:720px"><div><small>الإجمالي</small><b>${fm(gross)}</b></div><div><small>بعد الخصم</small><b>${fm(net)}</b></div><div><small>ضريبة ${s.settings.vatRate}%</small><b>${fm(vat)}</b></div><div style="background:var(--red-soft)"><small>المستحق</small><b>${fm(total)} ج</b></div>${canCost() ? `<div><small>التكلفة · الربح</small><b>${fm0(cst)} · <span style="color:var(--${net - cst >= 0 ? 'ok' : 'bad'})">${fm0(net - cst)}</span></b></div>` : ''}</div></div>
+      <div class="totals">
+        <div class="tl"><div><span>الإجمالي</span><b>${fm(gross)}</b></div>${gross - net ? `<div><span>الخصم</span><b class="neg">− ${fm(gross - net)}</b></div><div><span>بعد الخصم</span><b>${fm(net)}</b></div>` : ''}<div><span>ضريبة القيمة المضافة ${s.settings.vatRate}%</span><b>${fm(vat)}</b></div>
+          ${canCost() ? `<div class="sep"><span>التكلفة</span><b>${fm(cst)}</b></div><div><span>الربح</span><b style="color:var(--${net - cst >= 0 ? 'ok' : 'bad'})">${fm(net - cst)} <small>(${pct(net - cst, net)})</small></b></div>` : ''}</div>
+        <div class="due"><small>المستحق على العميل</small><b>${fm(total)}</b><em>جنيه</em></div>
+      </div></div>
     ${err ? `<div class="note bad">${esc(err)}</div>` : ''}
     <div class="bar"><button class="btn p lg" data-act="ni-save" ${err || !gross ? 'disabled' : ''}>${ic('check')} حفظ الفاتورة وإرسالها للضرايب</button><button class="btn" data-act="ni-reset">مسح</button></div>
-    <div class="crumb">الأسعار من قايمة ${c.kind === 'wholesale' ? 'الجملة' : 'القطاعي'}، والأدمن بس اللي يعدّلها من "الأصناف والأسعار". التكلفة بتتحسب من دفعات التشغيلات الأقدم (FIFO).</div>
+    <div class="crumb">الأسعار من قايمة ${c.kind === 'wholesale' ? 'الجملة' : 'القطاعي'}، والأدمن بس اللي يعدّلها من "الأصناف والأسعار". التكلفة بتتحسب من الدفعات الأقرب في الصلاحية (FEFO).</div>
   </div></div>`, { crumb: '<a href="#invoices">الفواتير</a> / جديدة' });
   const mb = U.content();
   document.getElementById('ni-c').onchange = e => { NI.cust = e.target.value; NI.method = null; U.render(); };
@@ -308,7 +314,7 @@ PAGES.users = () => {
   const s = S(), live = U.LIVE;
   const ACC = { home: U.ALL, batches: ['owner', 'supervisor', 'accountant'], worker: ['owner', 'supervisor', 'worker'], cutting: ['owner', 'supervisor', 'storekeeper', 'accountant'], stock: ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['owner', 'storekeeper', 'accountant'], invoices: ['owner', 'sales', 'accountant'], customers: ['owner', 'sales', 'accountant'], items: ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['owner', 'accountant'], reports: ['owner', 'accountant'], opening: ['owner', 'accountant'], audit: ['owner', 'accountant'], settings: ['owner'] };
   const pages = [['home', 'نظرة عامة'], ['batches', 'التشغيلات'], ['worker', 'شاشة العامل'], ['cutting', 'التقطيع'], ['stock', 'المخزون'], ['purchases', 'المشتريات'], ['invoices', 'الفواتير'], ['customers', 'العملاء'], ['items', 'الأصناف'], ['treasury', 'الخزنة'], ['reports', 'القوائم المالية'], ['opening', 'أرصدة البداية'], ['audit', 'سجل الحركات'], ['settings', 'الإعدادات']];
-  const cols = [{ t: 'الاسم', f: u => `<b>${esc(u.name)}</b>` }, { t: 'اسم الدخول', f: u => `<span class="mono">${esc(u.username || '—')}</span>` }, { t: 'الدور', f: u => E.ROLES[u.role].name }, { t: 'الحالة', f: u => u.active === false ? '<span class="pill bad">موقوف</span>' : '<span class="pill ok">شغال</span>' }];
+  const cols = [{ t: 'الاسم', f: u => `<span style="display:inline-flex;gap:10px;align-items:center">${U.avatar(u, 'av-sm')}<b>${esc(u.name)}</b></span>` }, { t: 'اسم الدخول', f: u => `<span class="mono">${esc(u.username || '—')}</span>` }, { t: 'الدور', f: u => E.ROLES[u.role].name }, { t: 'الحالة', f: u => u.active === false ? '<span class="pill bad">موقوف</span>' : '<span class="pill ok">شغال</span>' }];
   cols.push({ t: '', f: u => live ? (u.id === s.currentUser ? '<span class="pill red">حسابك</span>' : `<button class="btn sm" data-act="usr-edit" data-arg="${u.id}">تعديل</button> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">باسورد جديد</button>`) : (u.id === s.currentUser ? '<span class="pill red">الحساب الحالي</span>' : `<button class="btn sm" data-act="as-user" data-arg="${u.id}">جرّب كـ ${esc(u.name)}</button>`) });
   if (live) setTimeout(loadRequests);
   page('المستخدمين والصلاحيات', `${live ? '<div id="req-box"></div>' : ''}<div class="card"><div class="hd"><h3>المستخدمين</h3><span class="sub">${live ? 'كل واحد يدخل باسم المستخدم والباسورد بتوعه' : 'في نسخة التدريب جرّب أي حساب من "جرّب كـ" فوق'}</span>${live ? `<div class="tools"><button class="btn p" data-act="usr-new">${ic('plus')} مستخدم جديد</button></div>` : ''}</div><div class="bd">${table('us', cols, s.users)}</div></div>
@@ -320,13 +326,17 @@ async function loadRequests() {
   const { data } = await U.sb().from('profiles').select('*').eq('role', 'pending').order('created_at');
   if (!document.getElementById('req-box')) return;
   if (!data || !data.length) { box.innerHTML = ''; return; }
-  const roleSel = id => `<select class="f" id="rr-${id}" style="width:auto;min-width:150px">${Object.entries(E.ROLES).filter(([k]) => k !== 'pending' && k !== 'owner').map(([k, r]) => `<option value="${k}">${r.name}</option>`).join('')}</select>`;
+  const roleSel = id => `<select class="f" id="rr-${id}" style="width:auto;min-width:170px">${roleChoices('sales')}</select>`;
   box.innerHTML = `<div class="card" style="border-color:var(--red)"><div class="hd"><h3>طلبات الحسابات</h3><span class="sub">${data.length} طلب · اختار الصلاحية ودوس قبول</span></div><div class="bd"><div class="list">${data.map(p => `<div class="li" style="flex-wrap:wrap;gap:10px"><div class="x" style="min-width:180px"><b>${esc(p.name)}</b> <span class="mono">${esc(p.username)}</span><small>${esc(p.phone || '')} · ${p.active ? '<span class="pill warn">اتقبل ومستني صلاحية</span>' : '<span class="pill info">طلب جديد</span>'}</small></div>${roleSel(p.user_id)}<button class="btn sm p" data-act="rq-ok" data-arg="${p.user_id}">${p.active ? 'حدد الصلاحية' : 'قبول بالصلاحية دي'}</button>${p.active ? '' : `<button class="btn sm dan" data-act="rq-no" data-arg="${p.user_id}">رفض</button>`}</div>`).join('')}</div></div></div>`;
 }
-ACTS['rq-ok'] = id => run(async () => { await U.api('approveRequest', { id, role: val('rr-' + id) }); await reloadLive(); await U.countRequests(); }, 'اتقبل واتحددت الصلاحية');
+const approveReq = id => run(async () => { await U.api('approveRequest', { id, role: val('rr-' + id) }); await reloadLive(); await U.countRequests(); }, 'اتقبل واتحددت الصلاحية');
+ACTS['rq-ok'] = id => { if (val('rr-' + id) !== 'owner') return approveReq(id); const role = val('rr-' + id);
+  modal('صلاحية أدمن', '<div class="note bad">الأدمن بيشوف ويعدّل <b>كل حاجة</b>: الأسعار، والحسابات، والمستخدمين، والإعدادات، وتصفير الحسابات. اديها لحد واثق فيه بس.</div>', { saveText: 'أيوه، اديله أدمن', save: async () => { await U.api('approveRequest', { id, role }); await reloadLive(); await U.countRequests(); toast('اتقبل كأدمن', 'ok'); } }); };
 ACTS['rq-no'] = id => modal('رفض الطلب', '<div class="note bad">الحساب هيتمسح، ولو حب يطلب تاني يقدر.</div>', { saveText: 'رفض', save: async () => { await U.api('rejectRequest', { id }); await reloadLive(); await U.countRequests(); toast('اترفض الطلب', 'ok'); } });
 ACTS['as-user'] = id => { E.setUser(id); toast('دخلت كـ ' + E.me().name); location.hash = '#' + (E.me().role === 'worker' ? 'worker' : 'home'); U.render(); };
-const roleOpts = sel => Object.entries(E.ROLES).map(([k, r]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${r.name}</option>`).join('');
+// every assignable role; "pending" is a state, not a choice
+function roleChoices(sel) { return Object.entries(E.ROLES).filter(([k]) => k !== 'pending').map(([k, r]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${k === 'owner' ? 'أدمن · كل الصلاحيات' : r.name}</option>`).join(''); }
+const roleOpts = sel => roleChoices(sel);
 ACTS['usr-new'] = () => modal('مستخدم جديد', `<div class="fgrid"><label class="fld"><span>الاسم</span><input class="f" id="un-n"></label><label class="fld"><span>اسم الدخول (إنجليزي صغير)</span><input class="f" id="un-u" dir="ltr" autocomplete="off" placeholder="mahmoud"></label>
   <label class="fld"><span>الدور</span><select class="f" id="un-r">${roleOpts('worker')}</select></label><label class="fld"><span>الباسورد (٨ حروف على الأقل)</span><input class="f" id="un-p" dir="ltr" autocomplete="new-password" value="${genPw()}"></label></div>
   <div class="note info">ادّي الموظف اسم الدخول والباسورد. وتقدر تغيّر الباسورد بعدين من هنا.</div>`, { saveText: 'إنشاء الحساب', save: async () => { await U.api('createUser', { username: val('un-u').trim().toLowerCase(), name: val('un-n'), role: val('un-r'), password: val('un-p') }); await reloadLive(); toast('اتعمل الحساب', 'ok'); } });

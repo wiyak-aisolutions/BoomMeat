@@ -51,7 +51,7 @@ new MutationObserver(muts => { if (LANG !== 'en') return; for (const m of muts) 
   .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
 applyLang();
 const tf = at => at ? `<span style="white-space:nowrap">${df(at)} · ${at.slice(11, 16)}</span>` : '—';
-const packName = s => ({ 250: 'ربع كيلو', 500: 'نص كيلو', 1000: '١ كيلو', 1500: '١.٥ كيلو', 2000: '٢ كيلو', 2500: '٢.٥ كيلو' })[s] || (s / 1000 + ' كجم');
+const packName = s => ({ 250: '¼ كيلو', 500: '½ كيلو', 1000: '1 كيلو', 1500: '1.5 كيلو', 2000: '2 كيلو', 2500: '2.5 كيلو' })[s] || (s / 1000 + ' كجم');
 const toG = v => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? Math.round(n * 1000) : NaN; };
 const toP = v => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? Math.round(n * 100) : NaN; };
 const toI = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : NaN; };
@@ -80,12 +80,12 @@ const ic = n => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" str
 const ALL = ['owner', 'accountant', 'storekeeper', 'supervisor', 'sales'];
 const PAGES = {};
 const NAV = [
-  ['', [['home', 'نظرة عامة', 'home', ALL], ['flow', 'الورك فلو والتتبع', 'flow', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
+  ['', [['home', 'نظرة عامة', 'home', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
   ['الإنتاج والمخازن', [['batches', 'التشغيلات', 'batch', ['owner', 'supervisor', 'accountant']], ['worker', 'شاشة العامل', 'hand', ['owner', 'supervisor', 'worker']], ['cutting', 'التقطيع', 'knife', ['owner', 'supervisor', 'storekeeper', 'accountant']], ['stock', 'المخزون والدفعات', 'box', ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales']]]],
   ['المشتريات', [['purchases', 'الاستلام والمشتريات', 'truck', ['owner', 'storekeeper', 'accountant']], ['suppliers', 'الموردين', 'users', ['owner', 'storekeeper', 'accountant']]]],
   ['المبيعات', [['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
   ['الحسابات', [['treasury', 'الخزنة والبنوك', 'cash', ['owner', 'accountant']], ['expenses', 'المصروفات والإهلاك', 'receipt', ['owner', 'accountant']], ['journal', 'القيود اليومية', 'book', ['owner', 'accountant']], ['coa', 'دليل الحسابات', 'tree', ['owner', 'accountant']], ['reports', 'القوائم المالية', 'chart', ['owner', 'accountant']], ['opening', 'أرصدة البداية', 'book', ['owner', 'accountant']]]],
-  ['الإدارة', [['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
+  ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
 const ACCESS = {}; NAV.forEach(([, items]) => items.forEach(([id, t, , roles]) => { ACCESS[id] = { t, roles }; }));
 const DETAIL_PARENT = { batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
@@ -143,8 +143,14 @@ function renderSide() {
     if (g) h += `<div class="nav-g">${g}</div>`;
     for (const [id, t, icon] of vis) h += `<button class="nav ${cur === id ? 'on' : ''}" data-go="${id}">${ic(icon)}<span>${t}</span>${badge[id] ? `<span class="b">${badge[id]}</span>` : ''}${id === 'batches' && pend && isOwner() ? `<span class="b" style="background:#fff;color:var(--red);margin-inline-start:4px" title="طلبات تصحيح مستنية موافقة">${pend}</span>` : ''}</button>`;
   }
+  if (canCost()) {
+    const t = E.today(), inv = S_.docs.invoices, today = inv.filter(v => v.date === t).reduce((a, v) => a + v.net, 0);
+    const days = Array.from({ length: 30 }, (_, i) => E.addDays(t, -i - 1)), avg = inv.filter(v => days.includes(v.date)).reduce((a, v) => a + v.net, 0) / 30;
+    const p = avg ? today / avg : 0;
+    h += `<div class="today-ring" data-go="invoices" role="link" tabindex="0" style="cursor:pointer">${ring(p, { size: 46, sw: 6 })}<div><small>النهارده لحد دلوقتي</small><b>${fm0(today)} ج</b><small>${Math.round(p * 100)}% من متوسط اليوم</small></div></div>`;
+  }
   const u = E.me();
-  h += `<div class="sp"></div><div class="who"><span class="av">${esc(initials(u.name))}</span><div><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? '<button class="out" data-act="logout">خروج</button>' : ''}</div>`;
+  h += `<div class="sp"></div><div class="who"><button class="me-btn" data-act="me" aria-label="حسابي">${avatar(u, 'av')}</button><div><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? '<button class="out" data-act="logout">خروج</button>' : ''}</div>`;
   document.getElementById('side').innerHTML = h;
 }
 function renderTop(title, crumb, extra) {
@@ -247,6 +253,26 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   if (e.target.id === 'user-switch') { E.setUser(e.target.value); toast('دخلت كـ ' + E.me().name); location.hash = '#' + homeFor(); render(); }
 });
+ACTS.me = () => {
+  const u = E.me(); let pic = u.avatar || '';
+  modal('حسابي', `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+      <div id="me-pic" class="me-pic">${pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(u.name))}</span>`}</div>
+      <div style="display:flex;flex-direction:column;gap:8px"><label class="btn" for="me-file">${ic('plus')} صورة</label><input id="me-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <button class="btn dan sm" type="button" data-act="me-nopic">شيل الصورة</button></div></div>
+    <label class="fld"><span>الاسم اللي بيظهر</span><input class="f" id="me-name" value="${esc(u.name)}" maxlength="40"></label>
+    <div class="kv"><div><span>اسم الدخول</span><b class="mono">${esc(u.username || '—')}</b></div><div><span>الصلاحية</span><b>${E.ROLES[u.role] ? E.ROLES[u.role].name : '—'}</b></div></div>`,
+  { saveText: 'حفظ', save: async () => { await E.updateSelf({ name: val('me-name'), avatar: pic }); toast('اتحفظ', 'ok'); } });
+  const show = () => { document.getElementById('me-pic').innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(val('me-name')))}</span>`; };
+  ACTS['me-nopic'] = () => { pic = ''; show(); };
+  document.getElementById('me-file').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const img = new Image(); img.onload = () => { // square-crop and shrink to 160px so it stays light
+      const c = document.createElement('canvas'); c.width = c.height = 160; const k = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, 160, 160);
+      pic = c.toDataURL('image/jpeg', 0.85); show(); URL.revokeObjectURL(img.src);
+    }; img.onerror = () => toast('الملف ده مش صورة', 'bad'); img.src = URL.createObjectURL(f);
+  };
+};
 ACTS.menu = () => document.getElementById('app').classList.toggle('nav-open');
 ACTS.newmenu = (_, el) => {
   const ex = document.getElementById('newmenu'); if (ex) { ex.remove(); return; }
@@ -383,6 +409,42 @@ function spark(vals, color = '#fff') {
   const pts = vals.map((v, i) => `${W - i * W / (vals.length - 1)},${H - (v - min) / (max - min || 1) * H}`).join(' ');
   return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/></svg>`;
 }
+// lollipop: data oldest→newest [{label, v}], dashed daily target, glowing heads (today biggest)
+function lolli(data, { target = 0, fmt = v => v, h = 230 } = {}) {
+  if (!data.length) return '<div class="empty">مفيش بيانات</div>';
+  const rtl = document.documentElement.dir !== 'ltr';
+  const W = 640, pad = 24, bot = 28, n = data.length, H = h - pad - bot;
+  const max = Math.max(...data.map(d => d.v), target, 1) * 1.08;
+  const X = i => { const x = 18 + i * (W - 36) / Math.max(n - 1, 1); return rtl ? W - x : x; };
+  const Y = v => pad + H - v / max * H;
+  const every = Math.ceil(n / 8);
+  let s = `<svg class="lolli" viewBox="0 0 ${W} ${h}" role="img" direction="ltr" style="direction:ltr"><defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><linearGradient id="stemg" gradientUnits="userSpaceOnUse" x1="0" y1="${pad + H}" x2="0" y2="${pad}"><stop offset="0" stop-color="#FF6A3D" stop-opacity="0"/><stop offset="1" stop-color="#FF6A3D" stop-opacity=".9"/></linearGradient></defs>`;
+  for (let i = 0; i <= 3; i++) { const y = pad + H * i / 3; s += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line2)"/>`; }
+  data.forEach((d, i) => {
+    const x = X(i), y = Y(d.v), last = i === n - 1, hit = target && d.v >= target;
+    s += `<g class="hit"><title>${esc(d.label)} · ${esc(fmt(d.v))}</title><line class="stem" x1="${x}" x2="${x}" y1="${pad + H}" y2="${y}" stroke="${hit || last ? 'url(#stemg)' : 'var(--line)'}"/>`;
+    s += `<circle cx="${x}" cy="${y}" r="${last ? 7 : 4.5}" fill="${hit || last ? '#FF7A45' : 'var(--muted)'}" ${hit || last ? 'filter="url(#glow)"' : ''}/>`;
+    if (last) s += `<circle cx="${x}" cy="${y}" r="12" fill="none" stroke="#FF7A45" stroke-opacity=".35"/>`;
+    s += `</g>`;
+    if (i % every === (n - 1) % every) s += `<text x="${x}" y="${h - 8}" text-anchor="middle">${esc(d.label)}</text>`;
+  });
+  if (target) { const y = Y(target); s += `<line class="tgt" x1="0" x2="${W}" y1="${y}" y2="${y}"/><text x="${rtl ? W - 6 : 6}" y="${y - 6}" text-anchor="${rtl ? 'end' : 'start'}" style="fill:#FF7A45">الهدف ${esc(fmt(target))}</text>`; }
+  return `<div class="chart">${s}</svg></div>`;
+}
+// progress ring: p in 0..1
+function ring(p, { size = 120, sw = 12, color = 'url(#ringg)', label = '', sub = '' } = {}) {
+  const r = (size - sw) / 2, C = 2 * Math.PI * r, L = Math.max(0, Math.min(1, p)) * C;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${Math.round(p * 100)}%"><defs><linearGradient id="ringg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFB36B"/><stop offset=".5" stop-color="#FF6A3D"/><stop offset="1" stop-color="#D93A22"/></linearGradient></defs><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(128,128,140,.18)" stroke-width="${sw}"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${L} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" style="filter:drop-shadow(0 0 6px rgba(255,106,61,.55))"/>${label ? `<text x="50%" y="${sub ? '47%' : '53%'}" text-anchor="middle" dominant-baseline="middle" style="font:800 ${size / 5}px var(--head);fill:var(--ink)">${label}</text>` : ''}${sub ? `<text x="50%" y="66%" text-anchor="middle" style="font:600 ${size / 11}px var(--body);fill:var(--muted)">${sub}</text>` : ''}</svg>`;
+}
+// area chart: vals oldest→newest
+function area(vals, { h = 110 } = {}) {
+  if (vals.length < 2) return '';
+  const rtl = document.documentElement.dir !== 'ltr';
+  const W = 320, max = Math.max(...vals, 1), min = Math.min(...vals, 0), n = vals.length;
+  const pts = vals.map((v, i) => { const x = i * W / (n - 1); return [rtl ? W - x : x, 8 + (h - 16) * (1 - (v - min) / (max - min || 1))]; });
+  const line = pts.map(p => p.join(',')).join(' ');
+  return `<svg viewBox="0 0 ${W} ${h}" width="100%" height="${h}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="areag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF6A3D" stop-opacity=".35"/><stop offset="1" stop-color="#FF6A3D" stop-opacity="0"/></linearGradient></defs><polygon points="${pts[0][0]},${h} ${line} ${pts[n - 1][0]},${h}" fill="url(#areag)"/><polyline points="${line}" fill="none" stroke="#FF6A3D" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
 function donut(parts) {
   const tot = parts.reduce((s, p) => s + p.v, 0); if (!tot) return '<div class="empty">مفيش بيانات</div>';
   const R = 52, C = 2 * Math.PI * R; let off = 0, s = `<svg viewBox="0 0 140 140" width="140" height="140" role="img"><g transform="rotate(-90 70 70)">`;
@@ -409,10 +471,13 @@ function expPill(exp) { const d = E.daysBetween(E.today(), exp); return d < 0 ? 
 function itemOptions(filter, sel) { return S().items.filter(filter).map(i => `<option value="${i.id}" ${i.id === sel ? 'selected' : ''}>${esc(i.name)} · ${esc(i.code)}</option>`).join(''); }
 function partnerOptions(type, sel, filter = () => true) { return S().partners.filter(p => p.type === type && filter(p)).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join(''); }
 const methodOptions = (opts, sel) => opts.map(m => `<option value="${m}" ${m === sel ? 'selected' : ''}>${E.METHOD_NAME[m]}</option>`).join('');
+/* avatars: the user's photo, or their initials on a gold disc */
+function avatar(u, cls = 'av') { u = u || {}; return u.avatar ? `<img class="${cls} av-img" src="${esc(u.avatar)}" alt="">` : `<span class="${cls}">${esc(initials(u.name))}</span>`; }
+const userObj = id => S().users.find(x => x.id === id) || { name: E.userName(id) };
 function chatter(ref) {
   const rows = S().audit.filter(a => a.ref === ref).slice().reverse();
   if (!rows.length) return '<div class="empty">مفيش حركات</div>';
-  return `<div class="chatter">${rows.map(a => `<div class="m"><span class="av">${esc(initials(E.userName(a.user)))}</span><div><b>${esc(E.userName(a.user))}</b> <small>· ${tf(a.at)}</small><div>${tx(a.text)}</div></div></div>`).join('')}</div>`;
+  return `<div class="chatter">${rows.map(a => `<div class="m">${avatar(userObj(a.user))}<div><b>${esc(E.userName(a.user))}</b> <small>· ${tf(a.at)}</small><div>${tx(a.text)}</div></div></div>`).join('')}</div>`;
 }
 function periodBar(key, cur) {
   const t = E.today();
@@ -449,7 +514,7 @@ const CFG = window.BOOM_CONFIG || null;
 const LIVE = !!(CFG && CFG.url && CFG.anonKey);
 let SB = null, VERSION = -1, PROFILE = null, PENDING_REQ = 0;
 async function countRequests() { if (!SB || !PROFILE || PROFILE.role !== 'owner') return; const { count } = await SB.from('profiles').select('user_id', { count: 'exact', head: true }).eq('role', 'pending'); PENDING_REQ = count || 0; }
-const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe'];
+const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe'];
 let busyN = 0;
 function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"></div>'); if (busyN <= 0 && b) b.remove(); }
 async function api(op, args) {
@@ -548,9 +613,14 @@ async function bootLive() {
   }).subscribe();
 }
 
-window.UI = { pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, statusPill, expPill, itemOptions, partnerOptions, methodOptions, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
+window.UI = { avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
 window.UI.LIVE = LIVE; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
 window.UI.profile = () => PROFILE; window.UI.pendingRequests = () => PENDING_REQ; window.UI.countRequests = countRequests; window.UI.sb = () => SB;
+// cursor spotlight on glass surfaces
+document.addEventListener('pointermove', e => {
+  const el = e.target.closest && e.target.closest('.card,.kpi,.qa'); if (!el) return;
+  const r = el.getBoundingClientRect(); el.style.setProperty('--mx', (e.clientX - r.left) + 'px'); el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+}, { passive: true });
 window.UI.boot = () => {
   if (LIVE) { bootLive(); return; }
   E.init(); E.watch(E.today()); E.save(); route = parse(); render(); flushTelegram();

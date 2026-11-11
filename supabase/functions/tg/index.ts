@@ -26,6 +26,17 @@ const db = {
 };
 const esc = (s: string) => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
 
+const ROLE_AR: Record<string, string> = { owner: 'أدمن (كل الصلاحيات)', accountant: 'محاسب', storekeeper: 'أمين مخزن', supervisor: 'مشرف إنتاج', worker: 'عامل إنتاج', sales: 'مبيعات' };
+const roleKeyboard = (id: string) => ({ inline_keyboard: [
+  [{ text: '💼 محاسب', callback_data: `r:accountant:${id}` }, { text: '🛒 مبيعات', callback_data: `r:sales:${id}` }],
+  [{ text: '📦 أمين مخزن', callback_data: `r:storekeeper:${id}` }, { text: '🧑‍🏭 مشرف إنتاج', callback_data: `r:supervisor:${id}` }],
+  [{ text: '🔪 عامل إنتاج', callback_data: `r:worker:${id}` }, { text: '👑 أدمن', callback_data: `a:owner:${id}` }],
+  [{ text: '✅ قبول وأحدد بعدين', callback_data: `ok:${id}` }, { text: '❌ رفض', callback_data: `no:${id}` }],
+] });
+const requestText = (p: { name: string, username: string, phone?: string }) => `🆕 <b>طلب حساب جديد · بوم ميت</b>\n\nالاسم: ${esc(p.name)}\nاسم الدخول: <code>${esc(p.username)}</code>\nالتليفون: ${esc(p.phone || '')}\n\nاختار صلاحيته، وهيقدر يدخل على طول:`;
+async function sendRequest(chat: string, p: { user_id: string, name: string, username: string, phone?: string }) {
+  await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: requestText(p), reply_markup: roleKeyboard(p.user_id) });
+}
 async function requestAccount(b: Record<string, string>) {
   const name = String(b.name || '').trim(), username = String(b.username || '').trim().toLowerCase(), password = String(b.password || ''), phone = String(b.phone || '').trim();
   if (name.length < 3 || name.length > 60) return json(400, { error: 'اكتب اسمك (٣ حروف على الأقل)', field: 'name' });
@@ -49,8 +60,7 @@ async function requestAccount(b: Record<string, string>) {
     row.state.alerts.push({ id: 'ALR-' + data.user.id.slice(0, 8) + Date.now().toString(36), at: `${now.year}-${now.month}-${now.day}T${now.hour}:${now.minute}`, level: 'info', kind: 'request', text: `طلب حساب جديد: ${name} (${username}) · ${phone}`, ref: { type: 'user', id: data.user.id, no: username }, read: false, tg: chat ? 'sent' : 'noconfig' });
     if ((await db.save(row.state, row.version)) != null) break;
   }
-  if (chat) await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: `🆕 <b>طلب حساب جديد · بوم ميت</b>\n\nالاسم: ${esc(name)}\nاسم الدخول: <code>${esc(username)}</code>\nالتليفون: ${esc(phone)}\n\nلو وافقت، يقدر يدخل وتحدد صلاحياته من "المستخدمين والصلاحيات".`,
-    reply_markup: { inline_keyboard: [[{ text: '✅ قبول', callback_data: `ok:${data.user.id}` }, { text: '❌ رفض', callback_data: `no:${data.user.id}` }]] } });
+  if (chat) await sendRequest(chat, { user_id: data.user.id, name, username, phone });
   return json(200, { ok: true });
 }
 
@@ -67,6 +77,9 @@ async function telegramUpdate(u: Record<string, any>) {
         await setSecret('owner_chat', chat); await setSecret('tg_link_code', ''); 
         for (let i = 0; i < 4; i++) { const row = await db.load(); row.state.settings.tgChat = chat; row.state.settings.telegram = true; if ((await db.save(row.state, row.version)) != null) break; }
         await tg('sendMessage', { chat_id: chat, text: '✅ اتربط تليجرام بسيستم بوم ميت. هتوصلك هنا التنبيهات وطلبات الحسابات الجديدة.' });
+        // send every request that is still waiting, so nothing made before linking is missed
+        const { data: waiting } = await admin.from('profiles').select('*').eq('role', 'pending').eq('active', false).order('created_at');
+        for (const p of waiting || []) await sendRequest(chat, p);
         return;
       }
       await tg('sendMessage', { chat_id: chat, text: 'الكود ده انتهى أو غلط. اعمل كود جديد من الإعدادات في السيستم.' }); return;
@@ -77,15 +90,32 @@ async function telegramUpdate(u: Record<string, any>) {
   const cq = u.callback_query; if (!cq) return;
   const chat = String(cq.message?.chat?.id || '');
   if (!ownerChat || chat !== ownerChat) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مش مسموح' }); return; }
-  const [act, id] = String(cq.data || '').split(':');
+  const parts = String(cq.data || '').split(':');
+  const act = parts[0], id = parts[parts.length - 1], pickRole = parts.length === 3 ? parts[1] : '';
   const { data: p } = await admin.from('profiles').select('*').eq('user_id', id).maybeSingle();
-  if (!p || p.role !== 'pending' || p.active) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'الطلب ده اتعامل معاه قبل كده' }); return; }
+  if (!p || p.role !== 'pending') { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'الطلب ده اتعامل معاه قبل كده' }); return; }
   const owner = await ownerProfile();
+  const mid = cq.message.message_id;
+  if (act === 'a') { // admin needs a second tap
+    await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: `⚠️ <b>متأكد إنك عايز ${esc(p.name)} يبقى أدمن؟</b>\n\nالأدمن بيشوف ويعدّل كل حاجة: الأسعار، والحسابات، والمستخدمين، والإعدادات، وتصفير الحسابات.`,
+      reply_markup: { inline_keyboard: [[{ text: '👑 أيوه، أدمن', callback_data: `r:owner:${id}` }], [{ text: '↩️ رجوع', callback_data: `back:${id}` }]] } });
+    await tg('answerCallbackQuery', { callback_query_id: cq.id }); return;
+  }
+  if (act === 'back') { await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: requestText(p), reply_markup: roleKeyboard(id) }); await tg('answerCallbackQuery', { callback_query_id: cq.id }); return; }
+  if (act === 'r' && ROLE_AR[pickRole]) {
+    await admin.from('profiles').update({ active: true, role: pickRole }).eq('user_id', id);
+    await admin.auth.admin.updateUserById(id, { ban_duration: 'none' });
+    await syncUser({ E, db, profile: owner, user: { id, username: p.username, name: p.name, role: pickRole, active: true } });
+    await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: `✅ <b>اتقبل:</b> ${esc(p.name)} (<code>${esc(p.username)}</code>)\nالصلاحية: <b>${ROLE_AR[pickRole]}</b>\nيقدر يدخل دلوقتي.` });
+    await db.log({ user_id: owner?.user_id, username: owner?.username, op: 'approve_request_tg', args: { id, role: pickRole }, ok: true, error: null, version: null });
+    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'اتقبل · ' + ROLE_AR[pickRole] }); return;
+  }
+  if (p.active && act !== 'no') { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'اتقبل قبل كده، اختار صلاحيته' }); return; }
   if (act === 'ok') {
     await admin.from('profiles').update({ active: true }).eq('user_id', id);
     await admin.auth.admin.updateUserById(id, { ban_duration: 'none' });
     await syncUser({ E, db, profile: owner, user: { id, username: p.username, name: p.name, role: 'pending', active: true } });
-    await tg('editMessageText', { chat_id: chat, message_id: cq.message.message_id, parse_mode: 'HTML', text: `✅ <b>اتقبل:</b> ${esc(p.name)} (<code>${esc(p.username)}</code>)\nيقدر يدخل دلوقتي. حدد صلاحياته من "المستخدمين والصلاحيات".` });
+    await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: `✅ <b>اتقبل:</b> ${esc(p.name)} (<code>${esc(p.username)}</code>)\nلسه محتاج صلاحية. اختارها من هنا أو من "المستخدمين والصلاحيات":`, reply_markup: { inline_keyboard: roleKeyboard(id).inline_keyboard.slice(0, 3) } });
     await db.log({ user_id: owner?.user_id, username: owner?.username, op: 'approve_request_tg', args: { id }, ok: true, error: null, version: null });
   } else if (act === 'no') {
     await admin.auth.admin.deleteUser(id);
