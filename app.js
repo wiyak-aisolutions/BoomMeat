@@ -64,6 +64,7 @@ const initials = n => (n || '؟').trim().split(/\s+/).map(w => w[0]).slice(0, 2)
 
 /* ---------- icons ---------- */
 const P = {
+  refresh: 'M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', flow: 'M4 6h6v4H4zM14 14h6v4h-6zM7 10v4h10M17 10V6h-3',
   bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0', batch: 'M4 7h16M4 7l2 13h12l2-13M9 7V4h6v3',
@@ -147,15 +148,13 @@ function renderSide() {
     for (const [id, t, icon] of vis) h += `<button class="nav ${cur === id ? 'on' : ''}" data-go="${id}">${ic(icon)}<span>${t}</span>${badge[id] ? `<span class="b">${badge[id]}</span>` : ''}${id === 'batches' && pend && isOwner() ? `<span class="b" style="background:#fff;color:var(--red);margin-inline-start:4px" title="طلبات تصحيح مستنية موافقة">${pend}</span>` : ''}</button>`;
   }
   h += `</nav>`;
-  if (canCost()) {
-    const t = E.today(), inv = S_.docs.invoices, today = inv.filter(v => v.date === t).reduce((a, v) => a + v.net, 0);
-    const days = Array.from({ length: 30 }, (_, i) => E.addDays(t, -i - 1)), avg = inv.filter(v => days.includes(v.date)).reduce((a, v) => a + v.net, 0) / 30;
-    const p = avg ? today / avg : 0;
-    h += `<div class="today-ring" data-go="invoices" role="link" tabindex="0" style="cursor:pointer">${ring(p, { size: 46, sw: 6 })}<div><small>النهارده لحد دلوقتي</small><b>${fm0(today)} ج</b><small>${Math.round(p * 100)}% من متوسط اليوم</small></div></div>`;
-  }
   const u = E.me();
   h += `<div class="who"><button class="me-btn" data-act="me" aria-label="حسابي">${avatar(u, 'av')}</button><div class="who-t"><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? `<button class="out" data-act="logout" aria-label="تسجيل الخروج" title="تسجيل الخروج">${ic('logout')}</button>` : ''}</div>`;
-  document.getElementById('side').innerHTML = h;
+  // redrawing must not throw the menu back to the top: keep its scroll, and keep the selected item in view
+  const sideEl = document.getElementById('side'), oldNav = sideEl.querySelector('.side-nav'), keep = oldNav ? oldNav.scrollTop : 0;
+  sideEl.innerHTML = h;
+  const nav = sideEl.querySelector('.side-nav'), on = nav && nav.querySelector('.nav.on');
+  if (nav) { nav.scrollTop = keep; if (on) { const a = on.offsetTop - nav.offsetTop, b = a + on.offsetHeight; if (a < nav.scrollTop + 8) nav.scrollTop = Math.max(0, a - 48); else if (b > nav.scrollTop + nav.clientHeight - 8) nav.scrollTop = b - nav.clientHeight + 48; } }
 }
 function renderTop(title, crumb, extra) {
   const unread = S().alerts.filter(a => !a.read).length;
@@ -164,12 +163,14 @@ function renderTop(title, crumb, extra) {
     <button class="icon-btn menu-btn" data-act="menu" aria-label="القائمة">${ic('menu')}</button>
     <div><div class="crumb">${crumb || dfl(E.today())}</div><h1>${title}</h1></div>
     <div class="tools">${extra || ''}
+      ${role() !== 'worker' ? `<button class="find-btn no-print" data-act="find" aria-label="بحث في السيستم">${ic('search')}<span>ابحث عن عميل، مورد، صنف، فاتورة…</span><kbd>⌘K</kbd></button>` : ''}
+      <button class="icon-btn no-print" data-act="refresh" aria-label="تحديث" title="تحديث">${ic('refresh')}</button>
       ${quickFor().length ? `<button class="btn p no-print btn-new" data-act="newmenu" aria-label="جديد">${ic('plus')}<span class="lbl">جديد</span></button>` : ''}
       ${LIVE ? '' : `<label class="no-print" style="display:flex;align-items:center;gap:6px"><span class="crumb" style="white-space:nowrap">جرّب كـ</span>
         <select class="f" id="user-switch" style="height:38px;width:auto;max-width:230px" aria-label="جرّب كمستخدم">${users}</select></label>`}
       ${role() !== 'worker' ? `<button class="icon-btn" data-go="alerts" aria-label="التنبيهات">${ic('bell')}${unread ? `<span class="dot">${unread}</span>` : ''}</button>` : ''}
       <button class="icon-btn lang-btn" data-act="lang" aria-label="${LANG === 'en' ? 'العربية' : 'English'}">${LANG === 'en' ? 'ع' : 'EN'}</button>
-      <button class="icon-btn" data-act="theme" aria-label="الوضع الليلي">${ic(isDark() ? 'sun' : 'moon')}</button>
+      <button class="icon-btn theme-btn" data-act="theme" aria-label="الوضع الليلي">${ic(isDark() ? 'sun' : 'moon')}</button>
       <div class="acct-wrap"><button class="acct" data-act="acctmenu" aria-label="حسابي" aria-haspopup="menu">${avatar(E.me(), 'av')}</button></div>
     </div>`;
 }
@@ -182,7 +183,7 @@ function render() {
   try { PAGES[route.page](route.id); addExcelButton(); }
   catch (e) { console.error(e); content().innerHTML = `<div class="note bad">حصل خطأ في عرض الصفحة: ${esc(e.message)}</div>`; }
   const key = route.page + '/' + (route.id || '');
-  if (key !== lastKey) window.scrollTo({ top: 0 });
+  if (key !== lastKey) { window.scrollTo({ top: 0 }); enterPage(); }
   lastKey = key;
 }
 function page(title, html, { crumb, tools } = {}) { renderTop(title, crumb, tools); content().innerHTML = html; }
@@ -253,6 +254,7 @@ document.addEventListener('click', e => {
   const g = e.target.closest('[data-go]');
   if (g) { e.preventDefault(); const [p, id] = g.dataset.go.split('/'); go(p, id); return; }
   const a = e.target.closest('[data-act]');
+  if (a && a.dataset.act === 'ovclose' && e.target !== a) return; // a click INSIDE a modal: leave its default action alone (file pickers, checkboxes, links)
   if (a && ACTS[a.dataset.act]) { e.preventDefault(); ACTS[a.dataset.act](a.dataset.arg, a, e); }
 });
 document.addEventListener('change', e => {
@@ -261,14 +263,15 @@ document.addEventListener('change', e => {
 ACTS.me = () => {
   const u = E.me(); let pic = u.avatar || '';
   modal('حسابي', `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
-      <div id="me-pic" class="me-pic">${pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(u.name))}</span>`}</div>
-      <div style="display:flex;flex-direction:column;gap:8px"><label class="btn" for="me-file">${ic('plus')} صورة</label><input id="me-file" type="file" accept="image/*" hidden>
+      <button type="button" id="me-pic" class="me-pic" data-act="me-pick" aria-label="اختار صورة">${pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(u.name))}</span>`}</button>
+      <div style="display:flex;flex-direction:column;gap:8px"><button type="button" class="btn" data-act="me-pick">${ic('plus')} اختار صورة</button><input id="me-file" type="file" accept="image/*" hidden>
       <button class="btn dan sm" type="button" data-act="me-nopic">شيل الصورة</button></div></div>
     <label class="fld"><span>الاسم اللي بيظهر</span><input class="f" id="me-name" value="${esc(u.name)}" maxlength="40"></label>
     <div class="kv"><div><span>اسم الدخول</span><b class="mono">${esc(u.username || '—')}</b></div><div><span>الصلاحية</span><b>${E.ROLES[u.role] ? E.ROLES[u.role].name : '—'}</b></div></div>`,
   { foot: LIVE ? `<button class="btn dan" data-act="logout" style="margin-inline-end:auto">${ic('logout')} تسجيل الخروج</button>` : '', saveText: 'حفظ', save: async () => { await E.updateSelf({ name: val('me-name'), avatar: pic }); toast('اتحفظ', 'ok'); } });
   const show = () => { document.getElementById('me-pic').innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(val('me-name')))}</span>`; };
   ACTS['me-nopic'] = () => { pic = ''; show(); };
+  ACTS['me-pick'] = () => document.getElementById('me-file').click();
   document.getElementById('me-file').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     document.getElementById('me-pic').innerHTML = '<span class="mut">…</span>';
@@ -312,12 +315,75 @@ function notifyNew(unread) {
 ACTS.sound = () => { try { localStorage.setItem('boom-sound', soundOn() ? 'off' : 'on'); } catch (_) { /* private mode */ } unlockAudio(); if (soundOn()) chime(); toast(soundOn() ? 'صوت التنبيهات شغال' : 'صوت التنبيهات اتقفل', 'ok'); const m = document.getElementById('acctmenu'); if (m) m.remove(); };
 // follow the phone's light/dark setting unless the user picked one
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', e => { let picked = null; try { picked = localStorage.getItem('boom-theme'); } catch (_) { /* */ } if (!picked) { document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light'); render(); } });
+
+/* ---------- refresh ---------- */
+ACTS.refresh = async (_, el) => {
+  if (el) el.classList.add('spin');
+  try { if (LIVE) { await loadState(); await countRequests().catch(() => {}); } render(); toast('اتحدّثت الأرقام', 'ok'); }
+  catch (e) { toast('مفيش اتصال. جرّب تاني', 'bad'); }
+  finally { const b = document.querySelector('[data-act="refresh"]'); if (b) { b.classList.add('spin'); setTimeout(() => b.classList.remove('spin'), 600); } }
+};
+
+/* ---------- global search (⌘K): every customer, supplier, item, batch, invoice and screen ---------- */
+const norm = t => String(t || '').toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[ً-ْـ]/g, '');
+function findIndex() {
+  const s = S(), out = [], can = allowed;
+  const add = (group, icon, title, sub, go, keys, acts) => out.push({ group, icon, title, sub, go, k: norm([title, sub, ...(keys || [])].join(' ')), acts: acts || [] });
+  if (can('customers')) s.partners.filter(p => p.type === 'customer').forEach(p => add('العملاء', 'users', p.name, `${p.kind === 'wholesale' ? 'جملة' : 'قطاعي'}${p.phone ? ' · ' + p.phone : ''} · عليه ${fm0(E.partnerBalance(p.id))} ج`, 'customer/' + p.id, [p.phone], [['sale-to', p.id, 'بيع'], ['rc-new', p.id, 'تحصيل']]));
+  if (can('suppliers')) s.partners.filter(p => p.type === 'supplier').forEach(p => add('الموردين', 'truck', p.name, `${p.supplies || 'مورد'}${p.phone ? ' · ' + p.phone : ''} · له ${fm0(E.partnerBalance(p.id))} ج`, 'supplier/' + p.id, [p.phone], ['owner', 'storekeeper'].includes(role()) ? [['po-from', p.id, 'استلام توريدة']] : []));
+  if (can('items')) s.items.forEach(it => add('الأصناف', 'tag', it.name, `${it.code} · ${E.CAT_NAME[it.cat] || ''}`, 'items', [it.code], [])), out.forEach(o => { if (o.group === 'الأصناف' && !o.item) o.item = s.items.find(i => i.name === o.title); });
+  if (can('batches')) s.docs.batches.slice(-150).reverse().forEach(b => add('التشغيلات', 'batch', b.no, `${E.item(b.productId).name} · ${b.status === 'open' ? 'جارية' : 'مقفولة'} · ${df(b.date)}`, 'batch/' + b.id));
+  if (can('invoices')) s.docs.invoices.slice(-300).reverse().forEach(v => add('الفواتير', 'bill', v.no, `${E.partner(v.customerId).name} · ${fm0(v.total)} ج · ${df(v.date)}`, 'invoice/' + v.id));
+  if (can('purchases')) s.docs.purchases.slice(-150).reverse().forEach(x => add('المشتريات', 'receipt', x.no, `${E.partner(x.supplierId).name} · ${fm0(x.total)} ج · ${df(x.date)}${x.ref ? ' · ' + x.ref : ''}`, 'purchase/' + x.id, [x.ref]));
+  NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (roles.includes(role())) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
+  return out;
+}
+let FIND = { idx: [], res: [], sel: 0 };
+function findRender(q) {
+  const n = norm(q).trim().split(/\s+/).filter(Boolean);
+  const hit = n.length ? FIND.idx.filter(o => n.every(w => o.k.includes(w))) : FIND.idx.filter(o => o.group === 'الشاشات');
+  const per = {}; FIND.res = hit.filter(o => (per[o.group] = (per[o.group] || 0) + 1) <= (n.length ? 6 : 30)).slice(0, 40);
+  FIND.sel = Math.min(FIND.sel, Math.max(0, FIND.res.length - 1));
+  let last = '', h = '';
+  FIND.res.forEach((o, i) => {
+    if (o.group !== last) { h += `<div class="cmd-g">${o.group}</div>`; last = o.group; }
+    h += `<div class="cmd-r ${i === FIND.sel ? 'on' : ''}" data-act="find-go" data-arg="${i}" role="option" aria-selected="${i === FIND.sel}"><i>${ic(o.icon)}</i><div><b>${esc(o.title)}</b><small>${esc(o.sub)}</small></div>${o.acts.map(([a, arg, l]) => `<button class="btn sm" data-act="find-act" data-arg="${a}|${arg}">${l}</button>`).join('')}</div>`;
+  });
+  document.getElementById('cmd-list').innerHTML = h || `<div class="empty">مفيش حاجة بالاسم ده. جرّب اسم العميل أو رقم الفاتورة أو كود الصنف.</div>`;
+  const on = document.querySelector('.cmd-r.on'); if (on) on.scrollIntoView({ block: 'nearest' });
+}
+function findClose() { const c = document.getElementById('cmd'); if (c) c.remove(); }
+ACTS.find = () => {
+  if (document.getElementById('cmd')) return findClose();
+  FIND = { idx: findIndex(), res: [], sel: 0 };
+  document.body.insertAdjacentHTML('beforeend', `<div class="cmd-ov" id="cmd" data-act="find-x"><div class="cmd" role="dialog" aria-label="بحث في السيستم"><div class="cmd-in">${ic('search')}<input id="cmd-q" type="search" autocomplete="off" placeholder="اكتب اسم عميل، مورد، صنف، رقم فاتورة أو تشغيلة…" aria-label="بحث"><button class="icon-btn" data-act="find-x" aria-label="إغلاق">${ic('x')}</button></div><div class="cmd-list" id="cmd-list" role="listbox"></div></div></div>`);
+  const q = document.getElementById('cmd-q'); findRender(''); q.focus();
+  q.oninput = () => { FIND.sel = 0; findRender(q.value); };
+  q.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); FIND.sel = (FIND.sel + (e.key === 'ArrowDown' ? 1 : -1) + FIND.res.length) % Math.max(1, FIND.res.length); findRender(q.value); }
+    else if (e.key === 'Enter') { e.preventDefault(); ACTS['find-go'](FIND.sel); }
+    else if (e.key === 'Escape') findClose();
+  };
+};
+ACTS['find-x'] = (_, el, e) => { if (e.target === el || el.tagName === 'BUTTON') findClose(); };
+ACTS['find-go'] = i => {
+  const o = FIND.res[+i]; if (!o) return; findClose();
+  if (o.go === 'items' && o.item) { const tabsOf = { product: 'product', meat: 'meat', carcass: 'meat', spice: 'spice', pack: 'pack', byproduct: 'meat' }; TAB.it = tabsOf[o.item.cat] || 'product'; FILTER.itq = o.item.name; }
+  const [pg, id] = o.go.split('/'); go(pg, id);
+};
+ACTS['find-act'] = arg => { const [a, id] = arg.split('|'); findClose(); if (ACTS[a]) ACTS[a](id); };
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (role() !== 'worker' && document.getElementById('top')?.childElementCount) ACTS.find(); }
+  else if (e.key === 'Escape') findClose();
+});
 ACTS.acctmenu = (_, el) => {
   const ex = document.getElementById('acctmenu'); if (ex) { ex.remove(); return; }
   const u = E.me();
   el.parentElement.insertAdjacentHTML('beforeend', `<div class="menu acct-menu" id="acctmenu" role="menu"><div class="acct-head">${avatar(u, 'av')}<div><b>${esc(u.name)}</b><small>${esc(u.username || '')} · ${E.ROLES[u.role].name}</small></div></div>
     <button data-act="me" role="menuitem">${ic('users')}<span>حسابي: الاسم والصورة</span></button>
     <button data-act="sound" role="menuitem">${ic('bell')}<span>${soundOn() ? 'صوت التنبيهات: شغال' : 'صوت التنبيهات: مقفول'}</span></button>
+    <button data-act="theme" role="menuitem">${ic(isDark() ? 'sun' : 'moon')}<span>${isDark() ? 'الوضع النهاري' : 'الوضع الليلي'}</span></button>
+    <button data-act="lang" role="menuitem">${ic('send')}<span>${LANG === 'en' ? 'العربية' : 'English'}</span></button>
     ${LIVE ? `<button class="danger" data-act="logout" role="menuitem">${ic('logout')}<span>تسجيل الخروج</span></button>` : ''}</div>`);
 };
 document.addEventListener('click', e => { const m = document.getElementById('acctmenu'); if (m && !e.target.closest('[data-act="acctmenu"]') && (!e.target.closest('#acctmenu') || e.target.closest('[data-act]'))) setTimeout(() => m.remove()); }, true);
@@ -335,7 +401,7 @@ ACTS.print = () => window.print();
 /* ---------- toast / modal ---------- */
 function toast(msg, kind) {
   const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg;
-  document.getElementById('toasts').appendChild(t); setTimeout(() => t.remove(), kind === 'bad' ? 6000 : 3200);
+  document.getElementById('toasts').appendChild(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, kind === 'bad' ? 6000 : 3200);
 }
 let modalSave = null;
 function modal(title, body, { wide, save, saveText = 'حفظ', foot = '' } = {}) {
@@ -561,7 +627,7 @@ let SB = null, VERSION = -1, PROFILE = null, PENDING_REQ = 0;
 async function countRequests() { if (!SB || !PROFILE || PROFILE.role !== 'owner') return; const { count } = await SB.from('profiles').select('user_id', { count: 'exact', head: true }).eq('role', 'pending'); PENDING_REQ = count || 0; }
 const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'decideOrder'];
 let busyN = 0;
-function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"></div>'); if (busyN <= 0 && b) b.remove(); }
+function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"><span class="busy-pill"><i></i>جاري الحفظ…</span></div>'); if (busyN <= 0 && b) b.remove(); }
 async function api(op, args) {
   const { data: { session } } = await SB.auth.getSession();
   if (!session) { location.reload(); throw new Error('سجل دخول تاني'); }
@@ -663,13 +729,44 @@ async function bootLive() {
 }
 
 window.UI = { avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
+// WhatsApp chat button for any phone number on a profile (Egyptian mobiles: 01xxxxxxxxx → 201xxxxxxxxx)
+window.UI.waLink = ph => { const d = String(ph || '').replace(/\D/g, ''); const n = /^01\d{9}$/.test(d) ? '2' + d : /^20?1\d{9}$/.test(d) ? d.replace(/^20?/, '20') : ''; return n ? `<a class="btn wa" href="https://wa.me/${n}" target="_blank" rel="noopener">واتساب</a>` : ''; };
 window.UI.LIVE = LIVE; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
 window.UI.profile = () => PROFILE; window.UI.pendingRequests = () => PENDING_REQ; window.UI.countRequests = countRequests; window.UI.sb = () => SB;
-// cursor spotlight on glass surfaces
+/* ---------- motion: page entrance, count-up numbers, cursor light + 3D tilt ---------- */
+const CALM = matchMedia('(prefers-reduced-motion: reduce)');
+const FINE = matchMedia('(hover: hover) and (pointer: fine)');
+function enterPage() {
+  const c = content(); if (!c || CALM.matches) return;
+  c.classList.remove('enter'); void c.offsetWidth; c.classList.add('enter'); // restart the entrance animation
+  clearTimeout(enterPage.t); enterPage.t = setTimeout(() => c.classList.remove('enter'), 900);
+  // numbers count up from zero once, on arrival
+  c.querySelectorAll('.kpi b').forEach(b => {
+    const node = [...b.childNodes].find(n => n.nodeType === 3 && /\d/.test(n.nodeValue)); if (!node) return;
+    const full = node.nodeValue, m = full.match(/[\d,]+(\.\d+)?/); if (!m) return;
+    const target = parseFloat(m[0].replace(/,/g, '')), dec = (m[1] || '').length ? m[1].length - 1 : 0; if (!target) return;
+    const t0 = performance.now(), dur = 650;
+    const step = now => {
+      if (!node.isConnected) return;
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      node.nodeValue = k >= 1 ? full : full.replace(m[0], (target * e).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+let tiltEl = null;
+const untilt = () => { if (tiltEl) { tiltEl.style.removeProperty('--rx'); tiltEl.style.removeProperty('--ry'); tiltEl.classList.remove('tilt'); tiltEl = null; } };
 document.addEventListener('pointermove', e => {
-  const el = e.target.closest && e.target.closest('.card,.kpi,.qa'); if (!el) return;
-  const r = el.getBoundingClientRect(); el.style.setProperty('--mx', (e.clientX - r.left) + 'px'); el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  const el = e.target.closest && e.target.closest('.card,.kpi,.qa,.pc'); if (!el) { untilt(); return; }
+  const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  el.style.setProperty('--mx', x + 'px'); el.style.setProperty('--my', y + 'px');
+  // small tiles lean toward the cursor (desktop mouse only; big cards stay flat so tables stay readable)
+  if (!FINE.matches || CALM.matches || !el.matches('.kpi,.qa,.pc') || e.pointerType === 'touch') return;
+  if (tiltEl !== el) { untilt(); tiltEl = el; el.classList.add('tilt'); }
+  el.style.setProperty('--ry', ((x / r.width - 0.5) * 9).toFixed(2) + 'deg'); el.style.setProperty('--rx', ((0.5 - y / r.height) * 7).toFixed(2) + 'deg');
 }, { passive: true });
+document.addEventListener('pointerleave', untilt, true); window.addEventListener('blur', untilt);
 function hideSplash() { const el = document.getElementById('splash'); if (el && !el.classList.contains('done')) { el.classList.add('done'); setTimeout(() => el.remove(), 400); } }
 new MutationObserver((m, o) => { if (document.getElementById('content')?.childElementCount || document.querySelector('#app > .login')) { hideSplash(); o.disconnect(); } }).observe(document.getElementById('app'), { childList: true, subtree: true });
 setTimeout(hideSplash, 12000); // never stay stuck on the splash

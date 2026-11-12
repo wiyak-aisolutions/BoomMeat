@@ -14,6 +14,7 @@ const cors = {
 };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
+let snapDay = '';
 const db = {
   async load() {
     const { data, error } = await admin.from('erp_state').select('version,state').eq('id', 1).single();
@@ -26,8 +27,12 @@ const db = {
     return data; // null on version conflict
   },
   async log(entry: Record<string, unknown>) { await admin.from('erp_ops').insert(entry); },
+  // one full copy of the books per day: check first with a tiny query, so a normal save does not upload the whole state twice
   async snapshot(day: string, state: unknown, version: number) {
-    await admin.from('erp_snapshots').upsert({ day, state, version }, { onConflict: 'day', ignoreDuplicates: true });
+    if (snapDay === day) return;
+    const { data } = await admin.from('erp_snapshots').select('day').eq('day', day).maybeSingle();
+    if (!data) await admin.from('erp_snapshots').upsert({ day, state, version }, { onConflict: 'day', ignoreDuplicates: true });
+    snapDay = day;
   },
 };
 

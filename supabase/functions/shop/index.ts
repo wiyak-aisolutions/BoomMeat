@@ -11,11 +11,18 @@ const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 async function secret(key: string) { const { data } = await admin.from('erp_secrets').select('value').eq('key', key).maybeSingle(); return data?.value || ''; }
+let snapDay = '';
 const db = {
   async load() { const { data, error } = await admin.from('erp_state').select('version,state').eq('id', 1).single(); if (error) throw new Error(error.message); return data; },
   async save(state: unknown, base: number) { const { data, error } = await admin.rpc('erp_save', { p_state: state, p_base: base }); if (error) throw new Error(error.message); return data; },
   async log(entry: Record<string, unknown>) { await admin.from('erp_ops').insert(entry); },
-  async snapshot(day: string, state: unknown, version: number) { await admin.from('erp_snapshots').upsert({ day, state, version }, { onConflict: 'day', ignoreDuplicates: true }); },
+  // one full copy of the books per day: check first with a tiny query, so a normal save does not upload the whole state twice
+  async snapshot(day: string, state: unknown, version: number) {
+    if (snapDay === day) return;
+    const { data } = await admin.from('erp_snapshots').select('day').eq('day', day).maybeSingle();
+    if (!data) await admin.from('erp_snapshots').upsert({ day, state, version }, { onConflict: 'day', ignoreDuplicates: true });
+    snapDay = day;
+  },
 };
 async function telegram(chat: string, text: string) {
   const token = await secret('telegram_token');

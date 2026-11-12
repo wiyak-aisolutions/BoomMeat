@@ -20,13 +20,14 @@ PAGES.orders = () => {
     { t: 'الإجمالي', n: 1, f: o => `<b>${fm(o.total)}</b><br><small>${E.ORDER_METHODS[o.method]}</small>` },
     { t: 'الحالة', f: o => `<span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>` + (o.invoiceNo ? `<br><a href="#invoice/${esc(o.invoiceId)}">${esc(o.invoiceNo)}</a>` : '') + (o.status === 'approved' ? (o.receiptNo ? ' <span class="pill ok">اتحصّل</span>' : ' <span class="pill warn">لسه متحصلش</span>') : '') + (o.reason ? `<br><small>${esc(o.reason)}</small>` : '') },
     { t: '', f: o => o.status === 'pending' ? (o.test ? '' : `<button class="btn p sm" data-act="ord-ok" data-arg="${o.id}">${ic('check')} وافق</button> `) + `<button class="btn sm" data-act="ord-no" data-arg="${o.id}">ارفض</button>`
-        + (o.test ? ` <button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button>` : '')
+        + (o.test ? ` <button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button><br><small>طلب تجربة: ملوش موافقة</small>` : '')
         : o.test ? `<button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button>`
         : o.status === 'approved' && !o.receiptNo ? `<button class="btn sm" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} اتحصّل</button>` : '' },
   ];
   page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, o => o.total))} ج شامل الضريبة</span></div>
       <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => o.total))} ج</span></div></div>
     <div class="note">الطلبات دي جاية من بوت الواتساب. <b>الموافقة</b> بتعمل فاتورة آجل على العميل وبتخصم من الفريزر. ولما الفلوس تتحصّل عند التسليم (كاش أو إنستاباي) دوس <b>اتحصّل</b>.</div>
+    ${all.some(o => o.test) ? `<div class="note info">الطلبات اللي عليها <b>تجربة</b> جاية من رقم متسجل كرقم تجربة للبوت. دي مبتتحولش لفاتورة ومبتخصمش من المخزون، فمفيهاش زرار موافقة: ارفضها أو امسحها. الطلبات الحقيقية من أي رقم تاني بيظهر جنبها زرار <b>وافق</b>.</div>` : ''}
     <div class="bar">${tb.html}${searchBox('oq', 'ابحث برقم الطلب أو الاسم أو التليفون')}</div>
     <div class="card"><div class="bd">${table('ord', cols, rows, { empty: 'مفيش طلبات هنا' })}</div></div>`);
 };
@@ -122,6 +123,7 @@ PAGES.newinvoice = () => {
   const qi = document.getElementById('ni-q'); let tq; qi.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { NI.q = e.target.value; U.render(); const n = document.getElementById('ni-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   mb.querySelectorAll('.ni-c').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].count = Math.max(0, toI(el.value) || 0); U.render(); }; });
 };
+ACTS['sale-to'] = id => { NI.cust = id; NI.method = null; U.go('newinvoice'); };
 ACTS['ni-plus'] = arg => { const [id, z] = arg.split('|'); const l = NI.lines.find(x => x.productId === id && x.packSize === +z); if (l) l.count++; else NI.lines.push({ productId: id, packSize: +z, count: 1 }); U.render(); };
 ACTS['ni-minus'] = k => { const l = NI.lines[+k]; if (l) l.count--; U.render(); };
 ACTS['ni-del'] = k => { NI.lines.splice(+k, 1); U.render(); };
@@ -167,7 +169,7 @@ PAGES.customer = id => {
   const prod = {}; invs.forEach(v => v.lines.forEach(l => { prod[l.productId] = (prod[l.productId] || 0) + l.qty; }));
   page(esc(p.name), `<div class="kpis"><div class="kpi main"><small>الرصيد المستحق عليه</small><b>${fm0(E.partnerBalance(id))} <em>ج</em></b><span class="t">${p.terms === 'credit' ? 'عميل آجل' : 'عميل كاش'}</span></div>
       <div class="kpi"><small>مشتريات الشهر</small><b>${fm0(sumBy(invs.filter(v => v.date >= ms), v => v.total))} <em>ج</em></b></div><div class="kpi"><small>إجمالي المشتريات</small><b>${fm0(sumBy(invs, v => v.total))} <em>ج</em></b><span class="t">${invs.length} فاتورة</span></div></div>
-    <div class="bar"><span class="grow"></span>${['owner', 'accountant', 'sales'].includes(U.role()) ? `<button class="btn p" data-act="rc-new" data-arg="${id}">تحصيل</button>` : ''}<button class="btn" data-act="partner-edit" data-arg="${id}">تعديل البيانات</button></div>
+    <div class="bar"><span class="grow"></span>${['owner', 'accountant', 'sales'].includes(U.role()) ? `<button class="btn p" data-act="sale-to" data-arg="${id}">${ic('plus')} بيع للعميل ده</button><button class="btn" data-act="rc-new" data-arg="${id}">${ic('cash')} تحصيل</button>` : ''}${U.waLink(p.phone)}<button class="btn" data-act="partner-edit" data-arg="${id}">تعديل البيانات</button></div>
     <div class="grid g-main"><div class="card"><div class="hd"><h3>الفواتير</h3></div><div class="bd">${table('cinv', [{ t: 'الرقم', f: v => `<span class="mono">${esc(v.no)}</span>` }, { t: 'التاريخ', f: v => df(v.date) }, { t: 'الأصناف', f: v => v.lines.map(l => `${esc(E.item(l.productId).name)} ${l.count}×${packName(l.packSize)}`).join('، ') }, { t: 'الدفع', f: v => E.METHOD_NAME[v.method] }, { t: 'الإجمالي', n: 1, f: v => `<b>${fm(v.total)}</b>` }], invs.slice().reverse(), { onRow: v => 'invoice/' + v.id })}</div></div>
       <div class="card"><div class="hd"><h3>بيشتري إيه</h3><span class="sub">كجم</span></div><div class="bd">${hbars(Object.entries(prod).sort((a, b) => b[1] - a[1]).map(([k, q]) => ({ label: E.item(k).name, v: q })), v => kgf(v))}
         <div class="kv" style="margin-top:14px"><div><span>التليفون</span><b class="mono">${esc(p.phone || '—')}</b></div><div><span>رقم ضريبي</span><b>${esc(p.taxId || '—')}</b></div></div></div></div></div>
@@ -197,10 +199,10 @@ ACTS['cust-import'] = () => modal('استيراد عملاء من شيت', `<div
   let n = 0, skip = 0;
   for (const c of lines) { if (S().partners.some(p => p.type === 'customer' && p.name === c[0])) { skip++; continue; } await E.savePartner({ type: 'customer', name: c[0], phone: c[1] || '', kind: /قطاعي|فرد|retail/i.test(c[2] || '') ? 'retail' : 'wholesale', terms: /كاش|نقد|cash/i.test(c[3] || '') ? 'cash' : 'credit' }); n++; }
   toast(`اتضاف ${n} عميل${skip ? ` · ${skip} موجودين قبل كده` : ''}`, 'ok'); } });
-ACTS['rc-new'] = id => modal('تحصيل من ' + esc(E.partner(id).name), `<div class="note info">الرصيد المستحق: <b>${fm(E.partnerBalance(id))} ج</b></div>
+ACTS['rc-new'] = id => !id || !S().partners.some(p => p.id === id) ? ACTS['rc-pick']() : modal('تحصيل من ' + esc(E.partner(id).name), `<div class="note info">الرصيد المستحق: <b>${fm(E.partnerBalance(id))} ج</b></div>
   <div class="fgrid"><label class="fld"><span>المبلغ (ج)</span><input class="f" id="rc-a" type="number" min="0" step="0.01" value="${E.partnerBalance(id) / 100}"></label><label class="fld"><span>الطريقة</span><select class="f" id="rc-m">${methodOptions(['cash', 'bank', 'instapay'], 'bank')}</select></label><label class="fld"><span>التاريخ</span><input class="f" id="rc-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
   <label class="fld"><span>ملاحظة</span><input class="f" id="rc-n"></label>`, { saveText: 'تسجيل التحصيل', save: async () => { await E.receipt({ date: val('rc-d'), customerId: id, amount: toP(val('rc-a')), method: val('rc-m'), memo: val('rc-n') }); toast('اتسجل التحصيل', 'ok'); } });
-ACTS['pay-new'] = id => modal('سداد لـ ' + esc(E.partner(id).name), `<div class="note info">المستحق له: <b>${fm(E.partnerBalance(id))} ج</b></div>
+ACTS['pay-new'] = id => !id || !S().partners.some(p => p.id === id) ? U.go('suppliers') : modal('سداد لـ ' + esc(E.partner(id).name), `<div class="note info">المستحق له: <b>${fm(E.partnerBalance(id))} ج</b></div>
   <div class="fgrid"><label class="fld"><span>المبلغ (ج)</span><input class="f" id="py-a" type="number" min="0" step="0.01" value="${E.partnerBalance(id) / 100}"></label><label class="fld"><span>الطريقة</span><select class="f" id="py-m">${methodOptions(['bank', 'cash', 'instapay'], 'bank')}</select></label><label class="fld"><span>التاريخ</span><input class="f" id="py-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
   <label class="fld"><span>ملاحظة</span><input class="f" id="py-n"></label>`, { saveText: 'تسجيل السداد', save: async () => { await E.supplierPayment({ date: val('py-d'), supplierId: id, amount: toP(val('py-a')), method: val('py-m'), memo: val('py-n') }); toast('اتسجل السداد', 'ok'); } });
 

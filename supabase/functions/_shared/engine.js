@@ -39,8 +39,8 @@ const WAREHOUSES = [
   { id: 'W3', name: 'مخزن التعبئة والتغليف', use: 'pack' }, { id: 'W4', name: 'فريزر المنتج التام ١', use: 'fg' },
   { id: 'W5', name: 'تلاجة الإنتاج ٢', use: 'raw' }, { id: 'W6', name: 'فريزر المنتج التام ٢', use: 'fg' },
 ];
-const PACK_SIZES = [250, 500, 1000, 1500, 2000, 2500];
-const packsOf = p => (p.packs && p.packs.length ? p.packs : [500, 1000, 1500, 2000, 2500]);
+const PACK_SIZES = [500, 1000, 1500, 2000]; // the only pack sizes Boom Meat makes and sells
+const packsOf = p => (p.packs && p.packs.length ? p.packs : PACK_SIZES);
 const ROLES = {
   owner: { name: 'المالك (أدمن)', cost: true },
   accountant: { name: 'محاسب', cost: true },
@@ -70,7 +70,8 @@ function alloc(total, weights) { // split integer total by integer weights, exac
   return res;
 }
 const unitBase = u => (u === 'kg' ? 1000 : 1);
-const isInt = x => Number.isInteger(x);
+const isInt = x => Number.isInteger(x) && Math.abs(x) <= 1e10; // also caps absurd values (10,000 tonnes / 100M EGP per line) so sums stay exact
+const isDay = d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z')) && new Date(d + 'T00:00:00Z').toISOString().slice(0, 10) === d && d < '2100-01-01';
 
 /* ---------- dates ---------- */
 const pad = n => String(n).padStart(2, '0');
@@ -136,9 +137,9 @@ function audit(action, ref, text, date) {
 function alert(level, kind, text, ref, date) {
   S.alerts.push({ id: uid('AL'), at: stamp(date || today()), level, kind, text, ref, read: false, tg: seeding ? 'demo' : (S.settings.telegram ? 'pending' : 'off') });
 }
-function fail(msg) { throw new Error(msg); }
+function fail(msg) { const e = new Error(msg); e.refused = true; throw e; } // a deliberate, explained refusal
 function need(cond, msg) { if (!cond) fail(msg); }
-function checkDate(d) { need(/^\d{4}-\d{2}-\d{2}$/.test(d || ''), 'التاريخ غير صحيح'); need(d <= today(), 'مينفعش تسجل عملية بتاريخ بعد النهارده'); }
+function checkDate(d) { need(isDay(d), 'التاريخ غير صحيح'); need(d <= today(), 'مينفعش تسجل عملية بتاريخ بعد النهارده'); }
 function perm(...roles) { need(me().active !== false, 'الحساب ده موقوف'); const r = me().role; need(r === 'owner' || roles.includes(r), 'الصلاحية دي مش متاحة لحسابك'); }
 
 /* ---------- journal ---------- */
@@ -188,7 +189,13 @@ function fmtQty(q, unit) { return unit === 'kg' ? `${(q / 1000).toLocaleString('
 function tx(fn) {
   if (seeding) { const r = fn(); watch(seedDay || today()); return r; }
   const snap = JSON.stringify(S);
-  try { const r = fn(); watch(today()); save(); return r; } catch (e) { S = JSON.parse(snap); throw e; }
+  try { const r = fn(); watch(today()); save(); return r; }
+  catch (e) {
+    S = JSON.parse(snap);
+    if (e && (e.refused || /[\u0600-\u06FF]/.test(e.message || ''))) throw e; // our own Arabic messages pass through
+    // anything else is malformed input hitting the code (wrong type, missing field): refuse it in plain words, keep the cause for the log
+    const friendly = new Error('البيانات المبعوتة ناقصة أو مش مظبوطة. راجع الخانات وجرّب تاني'); friendly.refused = true; friendly.cause = e; throw friendly;
+  }
 }
 
 /* opening balance: capital + fixed assets */
@@ -221,8 +228,11 @@ function purchase({ date, supplierId, ref, lines, wh }) {
       need(it.cat !== 'product' && it.cat !== 'byproduct', `"${it.name}" مش صنف بيتشرى`);
       need(isInt(ln.qty) && ln.qty > 0, `كمية "${it.name}" غير صحيحة`);
       need(isInt(ln.unitCost) && ln.unitCost > 0, `سعر "${it.name}" غير صحيح`);
+      need(isDay(ln.expDate), `اكتب تاريخ صلاحية "${it.name}" صح`);
+      need(!ln.prodDate || (isDay(ln.prodDate) && ln.prodDate <= date), `تاريخ إنتاج "${it.name}" لازم يكون قبل الاستلام أو في نفس اليوم`);
       need(ln.expDate && ln.expDate > date, `تاريخ صلاحية "${it.name}" لازم يكون بعد تاريخ الاستلام`);
       const value = mulDiv(ln.qty, ln.unitCost, unitBase(it.unit));
+      need(value > 0 && value <= 1e12, `قيمة "${it.name}" مش منطقية. راجع الكمية والسعر`);
       const vat = Math.round(value * it.vat / 100);
       const lot = newLot({ itemId: it.id, wh, qty: ln.qty, value, inDate: date, prodDate: ln.prodDate || date, expDate: ln.expDate, src: { type: 'purchase', id: doc.id, no } });
       doc.lines.push({ itemId: it.id, qty: ln.qty, unitCost: ln.unitCost, value, vat, lotId: lot.id, lotCode: lot.code, prodDate: lot.prodDate, expDate: lot.expDate });
@@ -705,6 +715,7 @@ function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], 
     for (const st of stock) {
       const it = item(st.itemId);
       need(isInt(st.qty) && st.qty > 0, `كمية "${it.name}" غير صحيحة`); need(isInt(st.unitCost) && st.unitCost > 0, `تكلفة "${it.name}" غير صحيحة`);
+      need(isDay(st.expDate), `اكتب تاريخ صلاحية "${it.name}" صح`); need(!st.prodDate || (isDay(st.prodDate) && st.prodDate <= date), `تاريخ إنتاج "${it.name}" غير صحيح`);
       need(st.expDate && st.expDate > date, `صلاحية "${it.name}" لازم تكون بعد تاريخ البداية`);
       const wh = it.cat === 'product' ? (whUse(st.wh) === 'fg' ? st.wh : whs('fg')[0]) : it.cat === 'pack' ? whs('pack')[0] : (['raw', 'receiving'].includes(whUse(st.wh)) ? st.wh : whs('raw')[0]);
       if (it.cat === 'product') { need(packsOf(it).includes(st.packSize), `اختار عبوة "${it.name}"`); need(st.qty % st.packSize === 0, `كمية "${it.name}" لازم تكون عدد عبوات كامل`); }
@@ -796,7 +807,7 @@ function saveItem(o) {
     }
     need(!S.items.some(i => i.name === o.name.trim()), 'فيه صنف بنفس الاسم');
     const it = { id: uid('IT'), code: o.code, name: o.name.trim(), cat: o.cat, unit: o.cat === 'pack' ? 'pc' : o.unit, priceRetail: o.priceRetail || 0, priceWholesale: o.priceWholesale || 0, minQty: o.minQty || 0, vat: o.vat || 0, active: true };
-    if (o.cat === 'product') { it.packs = [500, 1000, 1500, 2000, 2500]; it.group = o.group || 'مصنعات'; }
+    if (o.cat === 'product') { it.packs = PACK_SIZES.slice(); it.group = o.group || 'مصنعات'; }
     S.items.push(it);
     audit('item_add', it.code, `إضافة صنف جديد: ${it.name}`);
     return it;
@@ -1015,7 +1026,7 @@ const WEBSITE = [ // [group, name, retail EGP, packs(g), recipe raw code]
   ['لحوم باردة', 'لانشون زيتون الانجوس', 115], ['لحوم باردة', 'سلامي الانجوس', 110], ['لحوم باردة', 'لانشون ساده الانجوس', 110], ['لحوم باردة', 'لانشون بسطرمه الانجوس', 115],
   ['لحوم باردة', 'روزبيف الانجوس', 150], ['لحوم باردة', 'بيبروني الانجوس', 110],
 ];
-const GROUP_PACKS = { 'مصنعات': [500, 1000, 1500, 2000, 2500], 'قطعيات': [500, 1000, 1500, 2000, 2500], 'قطعيات مميزة': [250, 500, 1000], 'مقبلات': [500, 1000], 'لحوم باردة': [250, 500] };
+const GROUP_PACKS = { 'مصنعات': PACK_SIZES, 'قطعيات': PACK_SIZES, 'قطعيات مميزة': PACK_SIZES, 'مقبلات': PACK_SIZES, 'لحوم باردة': PACK_SIZES };
 function masterData() {
   const kg = x => Math.round(x * 1000), egp = x => Math.round(x * 100);
   const I = (code, name, cat, unit, retail, extra = {}) => { const it = { id: 'it_' + code, code, name, cat, unit, priceRetail: egp(retail || 0), priceWholesale: egp(retail ? Math.round(retail * 0.9 / 5) * 5 : 0), minQty: 0, vat: 0, active: true, ...extra }; S.items.push(it); return it; };
@@ -1047,12 +1058,10 @@ function masterData() {
   I('SP-207', 'ملح', 'spice', 'kg', 0, { vat: 0 });
   I('SP-208', 'فلفل أسود', 'spice', 'kg', 0, { vat: 14 });
   I('SP-209', 'ممبار وأمعاء للسجق', 'spice', 'kg', 0, { vat: 0 });
-  I('PK-302', 'كيس فاكيوم ربع كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 300, packFor: 250 });
   I('PK-305', 'كيس فاكيوم نص كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 800, packFor: 500 });
   I('PK-310', 'كيس فاكيوم ١ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 800, packFor: 1000 });
   I('PK-315', 'كيس فاكيوم ١.٥ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 300, packFor: 1500 });
   I('PK-320', 'كيس فاكيوم ٢ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 300, packFor: 2000 });
-  I('PK-325', 'كيس فاكيوم ٢.٥ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 200, packFor: 2500 });
   I('PK-390', 'استيكر بوم ميت', 'pack', 'pc', 0, { vat: 14, minQty: 2000, sticker: true });
   S.items.sort((a, b) => a.code < b.code ? -1 : 1);
 }
@@ -1090,7 +1099,7 @@ function seed() {
   P('s1', 'supplier', 'مزرعة الوادي للمواشي', { phone: '01001234567', supplies: 'لحوم بالعضم', items: ['it_RM-100'] });
   P('s2', 'supplier', 'النيل للحوم المبردة', { phone: '01112345678', supplies: 'قطعيات', items: ['it_RM-101', 'it_RM-102', 'it_RM-105', 'it_RM-106'] });
   P('s3', 'supplier', 'البهارات الذهبية', { phone: '01223456789', supplies: 'توابل وإضافات', items: ['it_SP-201', 'it_SP-202', 'it_SP-203', 'it_SP-204', 'it_SP-205'] });
-  P('s4', 'supplier', 'العبوات الحديثة', { phone: '01534567890', supplies: 'أكياس فاكيوم', items: ['it_PK-302', 'it_PK-305', 'it_PK-310', 'it_PK-315', 'it_PK-320', 'it_PK-325'] });
+  P('s4', 'supplier', 'العبوات الحديثة', { phone: '01534567890', supplies: 'أكياس فاكيوم', items: ['it_PK-305', 'it_PK-310', 'it_PK-315', 'it_PK-320'] });
   P('s5', 'supplier', 'مطبعة الشروق', { phone: '01045678901', supplies: 'استيكرات', items: ['it_PK-390'] });
   P('c1', 'customer', 'جاست سماش', { kind: 'wholesale', terms: 'credit', phone: '01098765432', taxId: '111-222-333' });
   P('c2', 'customer', 'مطعم النخيل', { kind: 'wholesale', terms: 'credit', phone: '01187654321', taxId: '222-333-444' });
@@ -1130,7 +1139,7 @@ function seed() {
   const RECIPES = {
     'it_FG-401': { mix: { 'it_RM-101': 48, 'it_RM-102': 24, 'it_RM-104': 10, 'it_RM-103': 8, 'it_RM-106': 8, 'it_SP-201': 2 }, sizes: { 1000: 0.55, 500: 0.45 } },
     'it_FG-402': { mix: { 'it_RM-105': 55, 'it_RM-103': 15, 'it_RM-106': 15, 'it_RM-101': 12, 'it_SP-202': 3 }, sizes: { 1000: 0.6, 500: 0.4 } },
-    'it_FG-403': { mix: { 'it_RM-105': 45, 'it_RM-103': 20, 'it_RM-104': 10, 'it_RM-106': 20, 'it_SP-203': 5 }, sizes: { 2500: 0.2, 1000: 0.5, 500: 0.3 } },
+    'it_FG-403': { mix: { 'it_RM-105': 45, 'it_RM-103': 20, 'it_RM-104': 10, 'it_RM-106': 20, 'it_SP-203': 5 }, sizes: { 2000: 0.2, 1000: 0.5, 500: 0.3 } },
     'it_FG-404': { mix: { 'it_RM-105': 60, 'it_RM-104': 25, 'it_RM-106': 10, 'it_SP-202': 5 }, sizes: { 2000: 0.25, 1000: 0.45, 500: 0.3 } },
     'it_FG-405': { mix: { 'it_RM-105': 70, 'it_RM-101': 20, 'it_SP-202': 3, 'it_SP-205': 7 }, sizes: { 1500: 0.3, 1000: 0.4, 500: 0.3 } },
     'it_FG-406': { mix: { 'it_RM-105': 60, 'it_SP-204': 30, 'it_RM-106': 7, 'it_SP-202': 3 }, sizes: { 1000: 0.6, 500: 0.4 } },
@@ -1150,10 +1159,8 @@ function seed() {
   };
   const buyPack = date => {
     const d1 = as('u3', () => purchase({ date, supplierId: 's4', ref: 'AB-' + ri(1000, 9999), lines: [
-      { itemId: 'it_PK-302', qty: 2000, unitCost: egp(1.5), expDate: addDays(date, 720) },
       { itemId: 'it_PK-305', qty: 4000, unitCost: egp(1.8), expDate: addDays(date, 720) }, { itemId: 'it_PK-310', qty: 4000, unitCost: egp(2.4), expDate: addDays(date, 720) },
-      { itemId: 'it_PK-315', qty: 1200, unitCost: egp(2.9), expDate: addDays(date, 720) }, { itemId: 'it_PK-320', qty: 1200, unitCost: egp(3.3), expDate: addDays(date, 720) },
-      { itemId: 'it_PK-325', qty: 900, unitCost: egp(3.7), expDate: addDays(date, 720) }] }));
+      { itemId: 'it_PK-315', qty: 1200, unitCost: egp(2.9), expDate: addDays(date, 720) }, { itemId: 'it_PK-320', qty: 1200, unitCost: egp(3.3), expDate: addDays(date, 720) }] }));
     const d2 = as('u3', () => purchase({ date, supplierId: 's5', ref: 'SH-' + ri(100, 999), lines: [{ itemId: 'it_PK-390', qty: 10000, unitCost: egp(0.6), expDate: addDays(date, 720) }] }));
     moveAll(date, [...d1.lines, ...d2.lines].map(l => S.lots.find(x => x.id === l.lotId)), 'W3');
   };
@@ -1194,7 +1201,7 @@ function seed() {
     const input = want.reduce((s, x) => s + x[1], 0);
     let out = Math.floor(input * rnd(0.972, 0.99) / 500) * 500;
     const sizes = RECIPES[productId].sizes; const packs = {}; let rem = out;
-    for (const s of [2500, 2000, 1500, 1000]) { if (!sizes[s]) continue; const n = Math.floor(out * sizes[s] / s); packs[s] = n; rem -= n * s; }
+    for (const s of [2000, 1500, 1000]) { if (!sizes[s]) continue; const n = Math.floor(out * sizes[s] / s); packs[s] = n; rem -= n * s; }
     packs[500] = rem / 500;
     as('u4', () => closeBatch({ batchId: b.id, date, packs, split: splitPacks(packs) }));
     return b;

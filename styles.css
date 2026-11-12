@@ -797,3 +797,191 @@ table.t th.nm,table.t td.nm{white-space:normal;min-width:130px}
 .kpi.main b,.kpi.main small,.kpi.main .t{color:#fff!important;-webkit-text-fill-color:#fff!important}
 .kpi.main b em{color:rgba(255,255,255,.85)!important;-webkit-text-fill-color:rgba(255,255,255,.85)!important}
 .kpi.main .delta{background:rgba(255,255,255,.22)!important;color:#fff!important}
+button.me-pic{border:0;padding:0;cursor:pointer;font:inherit;color:inherit;transition:transform .15s}
+button.me-pic:hover{transform:scale(1.04)}button.me-pic:active{transform:scale(.96)}
+
+/* =====================================================================
+   ELITE MOTION + LIQUID GLASS
+   Rules: only transform/opacity animate; entrances run on navigation only;
+   everything is switched off under prefers-reduced-motion.
+   ===================================================================== */
+:root{--spring:cubic-bezier(.22,1.2,.36,1);--out:cubic-bezier(.16,1,.3,1)}
+
+/* --- page entrance: sections rise and settle, one after another --- */
+@keyframes rise{from{opacity:0;transform:translate3d(0,18px,0) scale(.985)}to{opacity:1;transform:none}}
+.content.enter>*{animation:rise .55s var(--out) both}
+.content.enter>*:nth-child(2){animation-delay:.05s}.content.enter>*:nth-child(3){animation-delay:.10s}
+.content.enter>*:nth-child(4){animation-delay:.15s}.content.enter>*:nth-child(5){animation-delay:.20s}
+.content.enter>*:nth-child(6){animation-delay:.25s}.content.enter>*:nth-child(n+7){animation-delay:.30s}
+.content.enter .kpis>*,.content.enter .qas>*,.content.enter .pcs>*,.content.enter .fridges>*{animation:rise .5s var(--out) both}
+.content.enter .kpis>*:nth-child(2),.content.enter .qas>*:nth-child(2),.content.enter .pcs>*:nth-child(2),.content.enter .fridges>*:nth-child(2){animation-delay:.05s}
+.content.enter .kpis>*:nth-child(3),.content.enter .qas>*:nth-child(3),.content.enter .pcs>*:nth-child(3),.content.enter .fridges>*:nth-child(3){animation-delay:.10s}
+.content.enter .kpis>*:nth-child(4),.content.enter .qas>*:nth-child(4),.content.enter .pcs>*:nth-child(4),.content.enter .fridges>*:nth-child(4){animation-delay:.15s}
+.content.enter .qas>*:nth-child(5),.content.enter .pcs>*:nth-child(5){animation-delay:.20s}
+.content.enter .qas>*:nth-child(6),.content.enter .pcs>*:nth-child(6){animation-delay:.25s}
+.content.enter .qas>*:nth-child(n+7),.content.enter .pcs>*:nth-child(n+7){animation-delay:.30s}
+/* charts draw themselves in */
+@keyframes growY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes pop{from{opacity:0;transform:scale(.2)}to{opacity:1;transform:scale(1)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.content.enter .chart rect,.content.enter .lolli .stem{transform-box:fill-box;transform-origin:bottom;animation:growY .7s var(--out) both;animation-delay:.25s}
+.content.enter .lolli .hit circle{transform-box:fill-box;transform-origin:center;animation:pop .45s var(--spring) both;animation-delay:.55s}
+.content.enter .lolli .tgt,.content.enter .lolli text{animation:fadeIn .5s ease both;animation-delay:.7s}
+.content.enter .hbar .tr i,.content.enter .goalbar i{transform-origin:right;animation:growX .8s var(--out) both;animation-delay:.3s}
+[dir="ltr"] .content.enter .hbar .tr i,[dir="ltr"] .content.enter .goalbar i{transform-origin:left}
+
+/* --- 3D: tiles lean toward the cursor, with real depth between layers --- */
+.kpis,.qas,.pcs{perspective:1100px}
+.kpi,.qa,.pc{transform-style:preserve-3d;transition:transform .45s var(--out),box-shadow .3s ease;will-change:transform}
+.kpi.tilt,.qa.tilt,.pc.tilt{transform:rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateZ(10px);transition:transform .08s linear,box-shadow .3s ease}
+.kpi.tilt b,.kpi.tilt .ic,.qa.tilt i,.qa.tilt b,.pc.tilt .pc-h{transform:translateZ(26px)}
+.kpi b,.kpi .ic,.qa i,.qa b,.pc .pc-h{transition:transform .45s var(--out)}
+.kpi.tilt,.qa.tilt,.pc.tilt{box-shadow:0 34px 60px -30px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16)!important}
+@media (hover:hover) and (pointer:fine){
+  .card{transition:transform .35s var(--out),box-shadow .35s ease}
+  .card:hover{transform:translateY(-2px)}
+  .content .card:has(table.t):hover,.pos-cart:hover{transform:none}
+}
+/* logo tile and avatars float gently */
+.side .brand{transition:transform .5s var(--out)}
+.side .brand:hover{transform:perspective(600px) rotateX(6deg) rotateY(-8deg) scale(1.02)}
+.hero .hero-av,.acct .av{transition:transform .35s var(--spring)}
+.me-btn:hover .hero-av,.acct:hover .av{transform:scale(1.08) rotate(-4deg)}
+
+/* --- press feedback: everything you can tap answers instantly --- */
+.btn,.icon-btn,.nav,.qa,.pz,.qb,.chip,.seg button,.bnav button,.add-line,.tabs button,.li,.stage,.pos-bar{-webkit-tap-highlight-color:transparent}
+.icon-btn,.nav,.seg button,.tabs button,.bnav button,.qb,.add-line,.pos-bar{transition:transform .14s var(--out),background .18s,color .18s,box-shadow .18s}
+.icon-btn:active,.seg button:active,.tabs button:active,.qb:active,.add-line:active,.pos-bar:active{transform:scale(.94)}
+.nav:active{transform:scale(.98)}
+.qa:active{transform:scale(.97)!important}
+tr.click{transition:background .15s}
+.btn.p{position:relative;overflow:hidden}
+.btn.p::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.35) 50%,transparent 70%);transform:translateX(120%);transition:transform .7s var(--out);pointer-events:none}
+.btn.p:hover::after{transform:translateX(-120%)}
+
+/* --- modals materialise: the glass arrives with blur + scale; sheets slide up on phones --- */
+@keyframes ovIn{from{opacity:0}to{opacity:1}}
+@keyframes mdIn{from{opacity:0;transform:translate3d(0,14px,0) scale(.955);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+@keyframes sheetIn{from{transform:translate3d(0,100%,0)}to{transform:none}}
+.ov{animation:ovIn .22s ease both}
+.md{animation:mdIn .34s var(--spring) both;transform-origin:50% 20%}
+@keyframes menuIn{from{opacity:0;transform:translate3d(0,-8px,0) scale(.96)}to{opacity:1;transform:none}}
+.menu{animation:menuIn .22s var(--spring) both;transform-origin:top}
+@keyframes toastIn{from{opacity:0;transform:translate3d(0,14px,0) scale(.94)}to{opacity:1;transform:none}}
+.toast{animation:toastIn .32s var(--spring) both;transition:opacity .25s,transform .25s}
+.toast.out{opacity:0;transform:translate3d(0,8px,0) scale(.96)}
+@media (max-width:860px){
+  .ov{padding:0!important;align-items:flex-end}
+  .md{max-width:none!important;border-radius:28px 28px 0 0!important;max-height:92dvh;display:flex;flex-direction:column;animation:sheetIn .38s var(--out) both;padding-bottom:env(safe-area-inset-bottom,0px)}
+  .md::before{content:"";display:block;width:44px;height:5px;border-radius:5px;background:rgba(128,128,140,.45);margin:8px auto 0;flex:none}
+  .md .mb{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0}
+  .md .mf{flex:none;position:sticky;bottom:0}
+}
+
+/* --- liquid glass chrome: top bar and bottom nav are thick glass with a bright rim --- */
+.top{-webkit-backdrop-filter:blur(30px) saturate(190%)!important;backdrop-filter:blur(30px) saturate(190%)!important}
+@media (max-width:860px){
+  .bnav{margin:0 10px calc(8px + env(safe-area-inset-bottom,0px));inset-inline:0;border-radius:24px;padding:6px!important;border:1px solid transparent!important;background:linear-gradient(rgba(255,255,255,.62),rgba(255,255,255,.44)) padding-box,linear-gradient(160deg,rgba(255,255,255,.95),rgba(255,255,255,.25) 45%,rgba(226,68,43,.3)) border-box!important;-webkit-backdrop-filter:blur(28px) saturate(190%)!important;backdrop-filter:blur(28px) saturate(190%)!important;box-shadow:0 18px 40px -16px rgba(40,20,12,.45),inset 0 1px 0 rgba(255,255,255,.8)}
+  :root[data-theme="dark"] .bnav{background:linear-gradient(rgba(30,30,36,.72),rgba(18,18,22,.62)) padding-box,linear-gradient(160deg,rgba(255,255,255,.26),rgba(255,255,255,.05) 45%,rgba(255,90,54,.35)) border-box!important;box-shadow:0 20px 44px -16px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.12)}
+  .bnav button{border-radius:18px;min-height:50px}
+  .bnav button svg{transition:transform .35s var(--spring)}
+  .bnav button.on{color:#fff!important;background:linear-gradient(135deg,#FF7A45,#D9442B)!important;box-shadow:0 10px 22px -10px rgba(217,68,43,.9),inset 0 1px 0 rgba(255,255,255,.35)}
+  .bnav button.on svg{transform:translateY(-1px) scale(1.12)}
+  .bnav button:active{transform:scale(.92)}
+  .app.has-bnav .content{padding-bottom:calc(104px + env(safe-area-inset-bottom,0px))!important}
+  .toasts{bottom:calc(96px + env(safe-area-inset-bottom,0px))!important}
+  .pos-bar{bottom:calc(92px + env(safe-area-inset-bottom))!important}
+}
+/* specular highlight that slides across glass tiles on hover */
+.kpi:not(.main)::before,.qa::before{transition:opacity .4s}
+/* live pulse on the alerts dot */
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(255,90,54,.55)}80%,100%{box-shadow:0 0 0 9px rgba(255,90,54,0)}}
+.icon-btn .dot,.bnav button .b{animation:ping 2.2s ease-out infinite}
+/* focus ring that matches the brand */
+:focus-visible{outline:2px solid #FF7A45!important;outline-offset:2px}
+
+@media (prefers-reduced-motion:reduce){
+  .content.enter>*,.content.enter *,.ov,.md,.menu,.toast,.icon-btn .dot,.bnav button .b{animation:none!important}
+  .kpi,.qa,.pc,.card,.side .brand{transition:none!important;transform:none!important}
+}
+
+/* ===== phone fixes from the full crawl ===== */
+@media (max-width:860px){
+  /* top bar: language + theme move into the account menu so page titles are never cut */
+  .top .lang-btn,.top .theme-btn{display:none}
+  .top h1{white-space:normal;overflow:visible;text-overflow:clip;font-size:19px;line-height:1.3}
+  .top .tools{gap:6px}
+  /* comfortable tap targets */
+  .content a:not(.btn),.md a:not(.btn){display:inline-flex;align-items:center;min-height:40px;padding-inline:4px}
+  .pill[role="button"],.pill[data-go]{min-height:40px;display:inline-flex;align-items:center;padding-inline:14px}
+  input[type="checkbox"],input[type="radio"]{width:24px;height:24px;accent-color:#E2452A}
+  label:has(>input[type="checkbox"]){min-height:44px;display:inline-flex;align-items:center;gap:10px}
+}
+/* second phone pass */
+table.t td:has(>.empty),table.t td .empty,.empty{white-space:normal}
+@media (max-width:860px){
+  .qas>*:last-child:nth-child(odd){grid-column:1/-1}
+  .tabs,.seg{flex-wrap:nowrap!important;overflow-x:auto;max-width:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tabs::-webkit-scrollbar,.seg::-webkit-scrollbar{display:none}
+  .tabs button,.seg button{white-space:nowrap;flex:none}
+  /* wide tables: a soft fade on the far edge says "swipe for more" */
+  .tw{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to left,#000 calc(100% - 28px),transparent)}
+  [dir="rtl"] .tw{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
+}
+
+/* ===== global search (⌘K) ===== */
+.find-btn{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 12px;border-radius:14px;border:1px solid var(--line);background:var(--glass2);color:var(--muted);font:600 13.5px var(--body);cursor:pointer;min-width:0;transition:border-color .15s,background .15s,transform .14s}
+.find-btn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.find-btn kbd{font:700 11px var(--body);border:1px solid var(--line);border-radius:6px;padding:1px 6px;opacity:.8}
+.find-btn:hover{border-color:var(--red);color:var(--ink)}.find-btn:active{transform:scale(.97)}
+@media (max-width:1180px){.find-btn span,.find-btn kbd{display:none}.find-btn{width:42px;justify-content:center;padding:0;border-radius:50%}}
+.cmd-ov{position:fixed;inset:0;z-index:300;background:rgba(8,8,12,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);display:flex;justify-content:center;align-items:flex-start;padding:9vh 14px 14px;animation:ovIn .18s ease both}
+.cmd{width:100%;max-width:640px;max-height:76vh;display:flex;flex-direction:column;border-radius:24px;border:1px solid transparent;background:linear-gradient(var(--glass-strong),var(--glass-strong)) padding-box,var(--edge) border-box;-webkit-backdrop-filter:blur(30px) saturate(190%);backdrop-filter:blur(30px) saturate(190%);box-shadow:0 40px 90px -30px rgba(0,0,0,.7);overflow:hidden;animation:mdIn .3s var(--spring) both}
+.cmd-in{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);color:var(--muted)}
+.cmd-in input{flex:1;min-width:0;border:0;background:none;outline:0;font:600 17px var(--body);color:var(--ink);height:44px}
+.cmd-in input::-webkit-search-cancel-button{display:none}
+.cmd-list{overflow-y:auto;padding:6px 8px 10px;-webkit-overflow-scrolling:touch}
+.cmd-g{font-size:11.5px;font-weight:800;color:var(--muted);padding:10px 10px 4px;letter-spacing:.03em}
+.cmd-r{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:14px;cursor:pointer;min-height:52px}
+.cmd-r>i{flex:none;width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:var(--glass2);border:1px solid var(--line);color:var(--red)}
+.cmd-r>div{flex:1;min-width:0}
+.cmd-r b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmd-r small{display:block;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmd-r.on,.cmd-r:hover{background:var(--red-soft)}
+.cmd-r .btn{flex:none}
+@media (max-width:860px){.cmd-ov{padding:10px 8px}.cmd{max-height:calc(100dvh - 20px);border-radius:22px}.cmd-r .btn{display:none}.cmd-r.on .btn{display:inline-flex}}
+
+/* refresh + saving indicator */
+@keyframes spin1{to{transform:rotate(360deg)}}
+.icon-btn.spin svg{animation:spin1 .6s var(--out)}
+.busy{height:3px}
+.busy-pill{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:400;display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:99px;font:700 13px var(--body);color:#fff;background:rgba(20,20,26,.86);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 14px 30px -12px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.14);animation:toastIn .25s var(--spring) both}
+.busy-pill i{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.3);border-top-color:#FF7A45;animation:spin1 .7s linear infinite}
+.btn.wa{color:#128C4A;border-color:rgba(18,140,74,.35)}
+:root[data-theme="dark"] .btn.wa{color:#3DDC84!important}
+
+/* ===== worker keypad: big keys, impossible to miss ===== */
+.wk-pad{display:flex;flex-direction:column;gap:12px;flex:1 1 320px;max-width:460px}
+.wk-qty{font-size:56px!important;min-height:84px;display:flex;align-items:center;justify-content:flex-end;padding:8px 22px!important;border-radius:22px!important}
+.pad{max-width:none!important;gap:10px!important}
+.pad button{height:78px!important;font:800 32px var(--head)!important;border-radius:20px!important;color:var(--ink);touch-action:manipulation;transition:transform .08s,background .12s}
+.pad button:active{transform:scale(.93)!important;background:linear-gradient(135deg,#FF7A45,#D9442B)!important;color:#fff}
+.pad button:last-child{color:var(--red)}
+@media (max-width:860px){
+  .wk-pad{flex:1 1 100%;max-width:none;order:-1}
+  .pad button{height:74px!important}
+  .wk-i{min-height:76px}
+  .card .bd:has(>.wk-pad) .btn.lg{min-height:60px;font-size:17px;width:100%;justify-content:center}
+}
+/* phone top bar: title on its own line, tools in a tidy row under it */
+@media (max-width:640px){
+  .top{flex-wrap:wrap;row-gap:8px;align-items:center}
+  .top>div:not(.tools){flex:1 1 100%;min-width:0}
+  .top .tools{width:100%;justify-content:flex-start;flex-wrap:nowrap}
+  .top .tools .acct-wrap{margin-inline-start:auto}
+  .top h1{font-size:21px}
+}
+/* crawl fixes: no sliding shine on buttons; wide report tables scroll inside their card on phones */
+.btn.p::after{content:none!important}
+@media (max-width:860px){.card .bd>table.t,.card .bd>div>table.t:not(.tw table){display:block;overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}}
