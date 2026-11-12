@@ -673,3 +673,51 @@ table.split td{vertical-align:middle}
 .totals .due b{font:800 clamp(22px,2.6vw,30px) var(--head);font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.15}
 .totals .due em{font-style:normal;opacity:.85;font-size:13px;font-weight:700}
 @media (max-width:560px){.totals{grid-template-columns:1fr}}
+
+/* ===== sidebar structure: logo + scrolling menu + fixed account footer (nothing gets squeezed) ===== */
+.side{overflow:hidden;gap:0}
+.side>*{flex-shrink:0}
+.side .brand{margin-bottom:8px}
+.side .brand img{height:56px}
+.side-nav{flex:1 1 auto!important;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:2px;margin:0 -6px;padding:0 6px 8px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent;-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 10px,#000 calc(100% - 16px),transparent 100%);mask-image:linear-gradient(180deg,transparent 0,#000 10px,#000 calc(100% - 16px),transparent 100%)}
+.side-nav>*{flex-shrink:0}
+.nav{min-height:40px}
+.side .today-ring{margin:8px 0 10px}
+.who{margin-top:auto;padding:12px 4px 2px}
+.who .who-t{min-width:0;flex:1}
+.who .who-t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who .out{margin-inline-start:auto;width:38px;height:38px;padding:0;display:grid;place-items:center;border-radius:12px;background:rgba(255,255,255,.07);color:var(--side-ink);transition:background .15s,color .15s}
+.who .out:hover{background:rgba(255,90,54,.18);color:#FF8A66}
+/* top-bar account chip + menu */
+.acct-wrap{position:relative}
+.acct{width:42px;height:42px;border-radius:50%;padding:0;border:1px solid var(--line);background:var(--glass2);display:grid;place-items:center;cursor:pointer;overflow:hidden}
+.acct .av{width:34px;height:34px;border-radius:50%;background:linear-gradient(180deg,var(--gold-2,#F6C65B),var(--gold,#E9A92E));color:#17110F;font-weight:800;display:grid;place-items:center;font-size:13px}
+.acct .av.av-img,.acct-head .av.av-img{object-fit:cover}
+.acct-menu{min-width:260px;top:50px;z-index:120}
+.acct-head{display:flex;gap:10px;align-items:center;padding:10px 10px 12px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.acct-head .av{width:40px;height:40px;border-radius:50%;flex:none;background:linear-gradient(180deg,#F6C65B,#E9A92E);color:#17110F;font-weight:800;display:grid;place-items:center}
+.acct-head b{display:block}.acct-head small{color:var(--muted);font-size:12px}
+.acct-menu button{width:100%}
+.acct-menu button.danger{color:var(--bad)}
+.acct-menu button.danger:hover{background:rgba(220,60,50,.12);color:var(--bad)}
+@media (max-width:860px){.side .brand img{height:48px}}
+/* tables: tidy single-line cells, long text wraps in a readable measure */
+table.t th,table.t td{white-space:nowrap}
+table.t th.w,table.t td.w{white-space:normal;min-width:220px;max-width:460px;line-height:1.6}
+table.t td small{white-space:normal}
+
+/* ===== phones: never trigger iOS auto-zoom (every field ≥16px) ===== */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media (max-width:900px){input,select,textarea{font-size:16px!important}}
+
+/* ===== calm background (replaces the blurred colour blobs) ===== */
+.aurora i{display:none!important}
+.aurora{background:radial-gradient(1100px 520px at 85% -8%,rgba(226,83,59,.07),transparent 62%),radial-gradient(900px 500px at 0% 110%,rgba(233,169,46,.06),transparent 60%),linear-gradient(180deg,#F7F5F1,#F1EEE9)}
+.aurora::after{opacity:.025}
+:root[data-theme="dark"] .aurora{background:radial-gradient(1000px 520px at 88% -10%,rgba(255,90,54,.10),transparent 60%),radial-gradient(900px 500px at 0% 115%,rgba(242,180,61,.04),transparent 60%),linear-gradient(180deg,#0E0E11,#0B0B0D)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .aurora{background:linear-gradient(180deg,#0E0E11,#0B0B0D)}}
+/* quick actions: all on one tidy row on desktop, 2 per row on phones */
+.qas{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(138px,1fr))!important;gap:12px}
+@media (max-width:600px){.qas{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+.fr-stats b{white-space:nowrap}
+table.t th.nm,table.t td.nm{white-space:normal;min-width:130px}

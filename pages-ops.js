@@ -225,7 +225,7 @@ PAGES.batch = id => {
   const issueCols = [
     { t: 'الصنف', f: i => `${esc(E.item(i.itemId).name)}${i.note ? ` <span class="pill mut">${esc(i.note)}</span>` : ''}` },
     { t: 'الكمية', n: 1, f: i => `<b>${qtyf(i.qty, E.item(i.itemId).unit)}</b>` },
-    { t: 'الدفعات (FIFO)', f: i => `<span class="mono">${i.parts.map(p_ => esc(p_.code)).join('، ')}</span>` },
+    { t: 'الدفعات (FEFO)', f: i => `<span class="mono">${i.parts.map(p_ => esc(p_.code)).join('، ')}</span>` },
   ];
   if (cost) issueCols.push({ t: 'القيمة', n: 1, f: i => fm(i.value) });
   issueCols.push({ t: 'بواسطة', f: i => esc(E.userName(i.by)) }, { t: 'الوقت', f: i => tf(i.at) },

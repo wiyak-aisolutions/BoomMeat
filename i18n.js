@@ -257,4 +257,8 @@ window.BOOM_EN = {
   'جنيه': 'EGP',
   'الخصم': 'Discount',
   'التكلفة بتتحسب من الدفعات الأقرب في الصلاحية (FEFO)': 'Cost comes from the lots closest to expiry (FEFO)',
+  'تسجيل الخروج': 'Sign out',
+  'حسابي: الاسم والصورة': 'My account: name & photo',
+  'الشاشات': 'Screens',
+  'الدفعات (FEFO)': 'Lots (FEFO)',
 };

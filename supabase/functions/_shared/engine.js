@@ -1052,6 +1052,7 @@ function seed() {
   };
   const buyPack = date => {
     const d1 = as('u3', () => purchase({ date, supplierId: 's4', ref: 'AB-' + ri(1000, 9999), lines: [
+      { itemId: 'it_PK-302', qty: 2000, unitCost: egp(1.5), expDate: addDays(date, 720) },
       { itemId: 'it_PK-305', qty: 4000, unitCost: egp(1.8), expDate: addDays(date, 720) }, { itemId: 'it_PK-310', qty: 4000, unitCost: egp(2.4), expDate: addDays(date, 720) },
       { itemId: 'it_PK-315', qty: 1200, unitCost: egp(2.9), expDate: addDays(date, 720) }, { itemId: 'it_PK-320', qty: 1200, unitCost: egp(3.3), expDate: addDays(date, 720) },
       { itemId: 'it_PK-325', qty: 900, unitCost: egp(3.7), expDate: addDays(date, 720) }] }));
@@ -1067,6 +1068,8 @@ function seed() {
     const outputs = shares.map(([id, s]) => ({ itemId: id, qty: Math.round(lot.qty * (s + rnd(-0.01, 0.01)) / 100) * 100 }));
     const cutQty = addDays(date, 5) > today() ? lot.qty - kg(100) : lot.qty; // the latest delivery keeps 100 kg on the hook
     outputs.forEach(o => { o.qty = Math.round(o.qty * cutQty / lot.qty / 100) * 100; });
+    const outT = outputs.reduce((x, o) => x + o.qty, 0), cap = cutQty * 0.985; // real cutting always loses a little
+    if (outT > cap) outputs.forEach(o => { o.qty = Math.floor(o.qty * cap / outT / 100) * 100; });
     as('u4', () => cutting({ date, lotId: lot.id, qty: cutQty, outputs }));
   };
   const buyCuts = date => {
@@ -1153,7 +1156,7 @@ function seed() {
       const out = Math.floor(q * rnd(0.985, 0.996) / 250) * 250;
       const sizes = packsOf(p), big = sizes.includes(1000) ? 1000 : sizes[sizes.length - 1], small = sizes[0];
       const nBig = Math.floor(out * 0.7 / big), rest = out - nBig * big;
-      const packs = { [big]: nBig }; if (rest % small === 0) packs[small] = (packs[small] || 0) + rest / small; else { packs[big] = nBig; }
+      const packs = { [big]: nBig }; packs[small] = (packs[small] || 0) + Math.floor(rest / small); // only the last few grams that don't fill a pack are waste
       const total = Object.entries(packs).reduce((sum, [z, n]) => sum + z * n, 0);
       if (total > 0 && total <= q) as('u4', () => closeBatch({ batchId: b.id, date: d, packs, split: splitPacks(packs) }));
     }

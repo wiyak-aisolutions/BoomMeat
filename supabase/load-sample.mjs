@@ -21,7 +21,12 @@ const byRole = r => profiles.find(p => p.role === r && p.active);
 const map = {}; for (const u of S.users) { const p = byRole(u.role); if (!p) throw new Error('no live user for role ' + u.role); map[u.id] = p.user_id; }
 const swap = o => { if (Array.isArray(o)) return o.map(swap); if (o && typeof o === 'object') { for (const k of Object.keys(o)) o[k] = swap(o[k]); return o; } return typeof o === 'string' && map[o] ? map[o] : o; };
 swap(S);
-S.users = profiles.map(p => ({ id: p.user_id, username: p.username, name: p.name, role: p.role, active: p.active }));
+// keep what people set themselves (photo) and any fridges/stores they added
+const oldU = Object.fromEntries((cur.state.users || []).map(u => [u.id, u]));
+S.users = profiles.map(p => ({ id: p.user_id, username: p.username, name: (oldU[p.user_id] || {}).name || p.name, role: p.role, active: p.active, ...((oldU[p.user_id] || {}).avatar ? { avatar: oldU[p.user_id].avatar } : {}) }));
+if (cur.state.warehouses && cur.state.warehouses.length) { const ids = new Set(cur.state.warehouses.map(w => w.id)); S.warehouses = [...cur.state.warehouses, ...(S.warehouses || []).filter(w => !ids.has(w.id))]; }
+// local backup of the books being replaced
+(await import('node:fs')).writeFileSync(path.join(here, '..', '..', 'private', `books-backup-v${cur.version}.json`), JSON.stringify(cur));
 S.mode = 'live'; S.currentUser = byRole('owner').user_id;
 S.settings = { ...S.settings, ...cur.state.settings };
 E.setState(S);

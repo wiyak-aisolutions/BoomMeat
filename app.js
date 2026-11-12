@@ -11,7 +11,8 @@ const fm = p => (p / 100).toLocaleString('en-US', { minimumFractionDigits: 2, ma
 const fm0 = p => Math.round(p / 100).toLocaleString('en-US');
 const kgf = g => (g / 1000).toLocaleString('en-US', { maximumFractionDigits: 3 });
 const qtyf = (q, unit) => unit === 'kg' ? `${kgf(q)} كجم` : `${q.toLocaleString('en-US')} قطعة`;
-const pct = (a, b) => b ? (a / b * 100).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%' : '—';
+// \u2066…\u2069 isolates the number so the % sign never flips inside Arabic text
+const pct = (a, b) => b ? '\u2066' + (a / b * 100).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%\u2069' : '—';
 /* ---------- language ---------- */
 let LANG = 'ar'; try { LANG = localStorage.getItem('boom-lang') === 'en' ? 'en' : 'ar'; } catch (e) { /* ignore */ }
 const loc = () => (LANG === 'en' ? 'en-GB' : 'ar-EG-u-nu-latn');
@@ -63,6 +64,7 @@ const initials = n => (n || '؟').trim().split(/\s+/).map(w => w[0]).slice(0, 2)
 
 /* ---------- icons ---------- */
 const P = {
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', flow: 'M4 6h6v4H4zM14 14h6v4h-6zM7 10v4h10M17 10V6h-3',
   bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0', batch: 'M4 7h16M4 7l2 13h12l2-13M9 7V4h6v3',
   hand: 'M7 11V5a2 2 0 0 1 4 0v5m0-1V4a2 2 0 0 1 4 0v6m0-2a2 2 0 0 1 4 0v6a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3l-3-5a2 2 0 0 1 3-2l2 2',
@@ -136,13 +138,14 @@ function renderSide() {
   const openB = S_.docs.batches.filter(b => b.status === 'open').length;
   const badge = { alerts: unread, batches: openB, users: PENDING_REQ };
   const cur = DETAIL_PARENT[route.page] || route.page;
-  let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div>`;
+  let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div><nav class="side-nav" aria-label="الشاشات">`;
   for (const [g, items] of NAV) {
     const vis = items.filter(([id, , , roles]) => roles.includes(role()));
     if (!vis.length) continue;
     if (g) h += `<div class="nav-g">${g}</div>`;
     for (const [id, t, icon] of vis) h += `<button class="nav ${cur === id ? 'on' : ''}" data-go="${id}">${ic(icon)}<span>${t}</span>${badge[id] ? `<span class="b">${badge[id]}</span>` : ''}${id === 'batches' && pend && isOwner() ? `<span class="b" style="background:#fff;color:var(--red);margin-inline-start:4px" title="طلبات تصحيح مستنية موافقة">${pend}</span>` : ''}</button>`;
   }
+  h += `</nav>`;
   if (canCost()) {
     const t = E.today(), inv = S_.docs.invoices, today = inv.filter(v => v.date === t).reduce((a, v) => a + v.net, 0);
     const days = Array.from({ length: 30 }, (_, i) => E.addDays(t, -i - 1)), avg = inv.filter(v => days.includes(v.date)).reduce((a, v) => a + v.net, 0) / 30;
@@ -150,7 +153,7 @@ function renderSide() {
     h += `<div class="today-ring" data-go="invoices" role="link" tabindex="0" style="cursor:pointer">${ring(p, { size: 46, sw: 6 })}<div><small>النهارده لحد دلوقتي</small><b>${fm0(today)} ج</b><small>${Math.round(p * 100)}% من متوسط اليوم</small></div></div>`;
   }
   const u = E.me();
-  h += `<div class="sp"></div><div class="who"><button class="me-btn" data-act="me" aria-label="حسابي">${avatar(u, 'av')}</button><div><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? '<button class="out" data-act="logout">خروج</button>' : ''}</div>`;
+  h += `<div class="who"><button class="me-btn" data-act="me" aria-label="حسابي">${avatar(u, 'av')}</button><div class="who-t"><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? `<button class="out" data-act="logout" aria-label="تسجيل الخروج" title="تسجيل الخروج">${ic('logout')}</button>` : ''}</div>`;
   document.getElementById('side').innerHTML = h;
 }
 function renderTop(title, crumb, extra) {
@@ -166,6 +169,7 @@ function renderTop(title, crumb, extra) {
       ${role() !== 'worker' ? `<button class="icon-btn" data-go="alerts" aria-label="التنبيهات">${ic('bell')}${unread ? `<span class="dot">${unread}</span>` : ''}</button>` : ''}
       <button class="icon-btn lang-btn" data-act="lang" aria-label="${LANG === 'en' ? 'العربية' : 'English'}">${LANG === 'en' ? 'ع' : 'EN'}</button>
       <button class="icon-btn" data-act="theme" aria-label="الوضع الليلي">${ic(isDark() ? 'sun' : 'moon')}</button>
+      <div class="acct-wrap"><button class="acct" data-act="acctmenu" aria-label="حسابي" aria-haspopup="menu">${avatar(E.me(), 'av')}</button></div>
     </div>`;
 }
 const content = () => document.getElementById('content');
@@ -261,7 +265,7 @@ ACTS.me = () => {
       <button class="btn dan sm" type="button" data-act="me-nopic">شيل الصورة</button></div></div>
     <label class="fld"><span>الاسم اللي بيظهر</span><input class="f" id="me-name" value="${esc(u.name)}" maxlength="40"></label>
     <div class="kv"><div><span>اسم الدخول</span><b class="mono">${esc(u.username || '—')}</b></div><div><span>الصلاحية</span><b>${E.ROLES[u.role] ? E.ROLES[u.role].name : '—'}</b></div></div>`,
-  { saveText: 'حفظ', save: async () => { await E.updateSelf({ name: val('me-name'), avatar: pic }); toast('اتحفظ', 'ok'); } });
+  { foot: LIVE ? `<button class="btn dan" data-act="logout" style="margin-inline-end:auto">${ic('logout')} تسجيل الخروج</button>` : '', saveText: 'حفظ', save: async () => { await E.updateSelf({ name: val('me-name'), avatar: pic }); toast('اتحفظ', 'ok'); } });
   const show = () => { document.getElementById('me-pic').innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(val('me-name')))}</span>`; };
   ACTS['me-nopic'] = () => { pic = ''; show(); };
   document.getElementById('me-file').onchange = e => {
@@ -280,6 +284,14 @@ ACTS.newmenu = (_, el) => {
 };
 ACTS.quick = k => { const m = document.getElementById('newmenu'); if (m) m.remove(); runQuick(k); };
 document.addEventListener('click', e => { const m = document.getElementById('newmenu'); if (m && !e.target.closest('#newmenu') && !e.target.closest('[data-act="newmenu"]')) m.remove(); }, true);
+ACTS.acctmenu = (_, el) => {
+  const ex = document.getElementById('acctmenu'); if (ex) { ex.remove(); return; }
+  const u = E.me();
+  el.parentElement.insertAdjacentHTML('beforeend', `<div class="menu acct-menu" id="acctmenu" role="menu"><div class="acct-head">${avatar(u, 'av')}<div><b>${esc(u.name)}</b><small>${esc(u.username || '')} · ${E.ROLES[u.role].name}</small></div></div>
+    <button data-act="me" role="menuitem">${ic('users')}<span>حسابي: الاسم والصورة</span></button>
+    ${LIVE ? `<button class="danger" data-act="logout" role="menuitem">${ic('logout')}<span>تسجيل الخروج</span></button>` : ''}</div>`);
+};
+document.addEventListener('click', e => { const m = document.getElementById('acctmenu'); if (m && !e.target.closest('[data-act="acctmenu"]') && (!e.target.closest('#acctmenu') || e.target.closest('[data-act]'))) setTimeout(() => m.remove()); }, true);
 ACTS.logout = async () => { if (SB) await SB.auth.signOut(); location.hash = ''; location.reload(); };
 function isDark() { return (document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark'; }
 ACTS.theme = () => {
@@ -456,11 +468,15 @@ function hbars(rows, fmt) { const max = Math.max(...rows.map(r => r.v), 1); retu
 
 /* ---------- tables ---------- */
 const LIMIT = {};
+const NAME_COLS = new Set(['المنتج', 'الصنف', 'العميل', 'المورد', 'الحساب', 'الاسم', 'الأصل']);
+const WRAP_COLS = new Set(['البيان', 'الأصناف', 'الناتج', 'الخامات', 'التفاصيل', 'التنبيه', 'السبب', 'الحركة', 'التغيير', 'الدفعات (FEFO)', 'بيورّد', 'العبوات', 'المصدر']);
 function table(key, cols, rows, { onRow, empty = 'مفيش بيانات', foot } = {}) {
   const lim = XLSX_ALL ? Infinity : (LIMIT[key] || 60);
   const shown = rows.slice(0, lim);
-  const th = cols.map(c => `<th class="${c.n ? 'n' : ''}">${c.t}</th>`).join('');
-  const tb = shown.map(r => `<tr class="${onRow ? 'click' : ''} ${r._cls || ''}" ${onRow ? `data-go="${esc(onRow(r))}"` : ''}>${cols.map(c => `<td class="${c.n ? 'n' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('');
+  // short cells stay on one line; only long-text columns wrap
+  const cls = c => [c.n ? 'n' : '', c.w || WRAP_COLS.has(c.t) ? 'w' : NAME_COLS.has(c.t) ? 'nm' : ''].join(' ').trim();
+  const th = cols.map(c => `<th class="${cls(c)}">${c.t}</th>`).join('');
+  const tb = shown.map(r => `<tr class="${onRow ? 'click' : ''} ${r._cls || ''}" ${onRow ? `data-go="${esc(onRow(r))}"` : ''}>${cols.map(c => `<td class="${cls(c)}">${c.f(r)}</td>`).join('')}</tr>`).join('');
   return `<div class="tw"><table class="t"><thead><tr>${th}</tr></thead><tbody>${tb || `<tr><td colspan="${cols.length}"><div class="empty">${empty}</div></td></tr>`}${foot || ''}</tbody></table></div>${rows.length > lim ? `<div class="more"><button class="btn sm" data-act="more" data-arg="${key}">عرض المزيد (${rows.length - lim} سطر)</button></div>` : ''}`;
 }
 ACTS.more = k => { LIMIT[k] = (LIMIT[k] || 60) + 100; render(); };
@@ -600,7 +616,7 @@ async function bootLive() {
   if (prof.role === 'pending') {
     document.getElementById('app').innerHTML = `<div class="login" style="width:100%"><div class="box glass"><div class="logo-tile"><img src="boom-logo.png" alt="Boom Meat"></div><h1>أهلًا ${esc(prof.name)}</h1>
       <p>حسابك اتقبل. المالك لسه هيحدد الشاشات اللي هتشتغل عليها، وأول ما يحددها هتظهرلك هنا.</p>
-      <button class="btn p lg" style="justify-content:center" onclick="location.reload()">تحديث</button><button class="btn" style="justify-content:center" data-act="logout">خروج</button></div></div>`;
+      <button class="btn p lg" style="justify-content:center" onclick="location.reload()">تحديث</button><button class="btn" style="justify-content:center" data-act="logout">تسجيل الخروج</button></div></div>`;
     return;
   }
   try { await loadState(); } catch (e) { document.getElementById('content').innerHTML = `<div class="note bad">${esc(e.message)}</div>`; return; }
