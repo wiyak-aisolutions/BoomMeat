@@ -85,7 +85,7 @@ const NAV = [
   ['', [['home', 'نظرة عامة', 'home', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
   ['الإنتاج والمخازن', [['batches', 'التشغيلات', 'batch', ['owner', 'supervisor', 'accountant']], ['worker', 'شاشة العامل', 'hand', ['owner', 'supervisor', 'worker']], ['cutting', 'التقطيع', 'knife', ['owner', 'supervisor', 'storekeeper', 'accountant']], ['stock', 'المخزون والدفعات', 'box', ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales']]]],
   ['المشتريات', [['purchases', 'الاستلام والمشتريات', 'truck', ['owner', 'storekeeper', 'accountant']], ['suppliers', 'الموردين', 'users', ['owner', 'storekeeper', 'accountant']]]],
-  ['المبيعات', [['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
+  ['المبيعات', [['orders', 'طلبات واتساب', 'send', ['owner', 'sales', 'accountant']], ['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
   ['الحسابات', [['treasury', 'الخزنة والبنوك', 'cash', ['owner', 'accountant']], ['expenses', 'المصروفات والإهلاك', 'receipt', ['owner', 'accountant']], ['journal', 'القيود اليومية', 'book', ['owner', 'accountant']], ['coa', 'دليل الحسابات', 'tree', ['owner', 'accountant']], ['reports', 'القوائم المالية', 'chart', ['owner', 'accountant']], ['opening', 'أرصدة البداية', 'book', ['owner', 'accountant']]]],
   ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
@@ -96,7 +96,7 @@ const QUICK = [
   ['go:worker', 'صرف خامات', 'من التابلت على تشغيلة', 'hand', ['owner', 'supervisor', 'worker']],
   ['po-new', 'استلام بضاعة', 'من مورد بالباركود', 'truck', ['owner', 'storekeeper']],
   ['cut-new', 'عملية تقطيع', 'دفعة بالعضم لقطعيات', 'knife', ['owner', 'supervisor', 'storekeeper']],
-  ['go:newinvoice', 'فاتورة جديدة', 'بيع لعميل', 'bill', ['owner', 'sales', 'accountant']],
+  ['go:newinvoice', 'بيع جديد', 'أوردر من المصنع أو التليفون', 'bill', ['owner', 'sales', 'accountant']],
   ['rc-pick', 'تحصيل', 'فلوس من عميل', 'cash', ['owner', 'accountant', 'sales']],
   ['ex-new', 'مصروف', 'كهربا، مرتبات، إيجار', 'receipt', ['owner', 'accountant']],
 ];
@@ -105,7 +105,7 @@ const BNAV = {
   accountant: [['home', 'الرئيسية', 'home'], ['invoices', 'الفواتير', 'bill'], ['treasury', 'الخزنة', 'cash'], ['reports', 'القوائم', 'chart']],
   storekeeper: [['home', 'الرئيسية', 'home'], ['stock', 'المخزون', 'box'], ['purchases', 'الاستلام', 'truck'], ['suppliers', 'الموردين', 'users']],
   supervisor: [['home', 'الرئيسية', 'home'], ['batches', 'التشغيلات', 'batch'], ['worker', 'الصرف', 'hand'], ['stock', 'المخزون', 'box']],
-  sales: [['home', 'الرئيسية', 'home'], ['newinvoice', 'فاتورة', 'plus'], ['invoices', 'الفواتير', 'bill'], ['customers', 'العملاء', 'users']],
+  sales: [['home', 'الرئيسية', 'home'], ['newinvoice', 'بيع جديد', 'plus'], ['invoices', 'الفواتير', 'bill'], ['customers', 'العملاء', 'users']],
   worker: [],
 };
 function renderBnav() {
@@ -134,9 +134,10 @@ window.addEventListener('hashchange', () => { route = parse(); render(); });
 /* ---------- layout ---------- */
 function renderSide() {
   const S_ = S(); const unread = S_.alerts.filter(a => !a.read).length;
+  notifyNew(unread);
   const pend = S_.docs.corrections.filter(c => c.status === 'pending').length;
   const openB = S_.docs.batches.filter(b => b.status === 'open').length;
-  const badge = { alerts: unread, batches: openB, users: PENDING_REQ };
+  const badge = { alerts: unread, batches: openB, users: PENDING_REQ, orders: (S_.docs.orders || []).filter(o => o.status === 'pending').length };
   const cur = DETAIL_PARENT[route.page] || route.page;
   let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div><nav class="side-nav" aria-label="الشاشات">`;
   for (const [g, items] of NAV) {
@@ -261,34 +262,62 @@ ACTS.me = () => {
   const u = E.me(); let pic = u.avatar || '';
   modal('حسابي', `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
       <div id="me-pic" class="me-pic">${pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(u.name))}</span>`}</div>
-      <div style="display:flex;flex-direction:column;gap:8px"><label class="btn" for="me-file">${ic('plus')} صورة</label><input id="me-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <div style="display:flex;flex-direction:column;gap:8px"><label class="btn" for="me-file">${ic('plus')} صورة</label><input id="me-file" type="file" accept="image/*" hidden>
       <button class="btn dan sm" type="button" data-act="me-nopic">شيل الصورة</button></div></div>
     <label class="fld"><span>الاسم اللي بيظهر</span><input class="f" id="me-name" value="${esc(u.name)}" maxlength="40"></label>
     <div class="kv"><div><span>اسم الدخول</span><b class="mono">${esc(u.username || '—')}</b></div><div><span>الصلاحية</span><b>${E.ROLES[u.role] ? E.ROLES[u.role].name : '—'}</b></div></div>`,
   { foot: LIVE ? `<button class="btn dan" data-act="logout" style="margin-inline-end:auto">${ic('logout')} تسجيل الخروج</button>` : '', saveText: 'حفظ', save: async () => { await E.updateSelf({ name: val('me-name'), avatar: pic }); toast('اتحفظ', 'ok'); } });
   const show = () => { document.getElementById('me-pic').innerHTML = pic ? `<img src="${esc(pic)}" alt="">` : `<span>${esc(initials(val('me-name')))}</span>`; };
   ACTS['me-nopic'] = () => { pic = ''; show(); };
-  document.getElementById('me-file').onchange = e => {
-    const f = e.target.files[0]; if (!f) return;
-    const img = new Image(); img.onload = () => { // square-crop and shrink to 160px so it stays light
-      const c = document.createElement('canvas'); c.width = c.height = 160; const k = Math.min(img.width, img.height);
-      c.getContext('2d').drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, 160, 160);
-      pic = c.toDataURL('image/jpeg', 0.85); show(); URL.revokeObjectURL(img.src);
-    }; img.onerror = () => toast('الملف ده مش صورة', 'bad'); img.src = URL.createObjectURL(f);
+  document.getElementById('me-file').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    document.getElementById('me-pic').innerHTML = '<span class="mut">…</span>';
+    const draw = src => { // square-crop and shrink to 160px so it stays light
+      const c = document.createElement('canvas'); c.width = c.height = 160; const w = src.width, h = src.height, k = Math.min(w, h);
+      c.getContext('2d').drawImage(src, (w - k) / 2, (h - k) / 2, k, k, 0, 0, 160, 160);
+      pic = c.toDataURL('image/jpeg', 0.85); show();
+    };
+    try { draw(await createImageBitmap(f)); return; } catch (_) { /* fall back to <img> (older Safari) */ }
+    const url = URL.createObjectURL(f), img = new Image();
+    img.onload = () => { draw(img); URL.revokeObjectURL(url); };
+    img.onerror = () => { URL.revokeObjectURL(url); show(); toast('الصورة دي مش راضية تفتح. جرّب صورة تانية أو سكرين شوت منها', 'bad'); };
+    img.src = url;
   };
 };
 ACTS.menu = () => document.getElementById('app').classList.toggle('nav-open');
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('app').classList.remove('nav-open'); });
 ACTS.newmenu = (_, el) => {
   const ex = document.getElementById('newmenu'); if (ex) { ex.remove(); return; }
   el.parentElement.insertAdjacentHTML('beforeend', `<div class="menu" id="newmenu">${quickFor().map(q => `<button data-act="quick" data-arg="${q[0]}">${ic(q[3])}<span>${q[1]}</span></button>`).join('')}</div>`);
 };
 ACTS.quick = k => { const m = document.getElementById('newmenu'); if (m) m.remove(); runQuick(k); };
 document.addEventListener('click', e => { const m = document.getElementById('newmenu'); if (m && !e.target.closest('#newmenu') && !e.target.closest('[data-act="newmenu"]')) m.remove(); }, true);
+
+/* ---------- alert sound + tab badge ---------- */
+let LAST_UNREAD = null, AC = null;
+const soundOn = () => { try { return localStorage.getItem('boom-sound') !== 'off'; } catch (_) { return true; } };
+function unlockAudio() { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (_) { /* no audio */ } }
+document.addEventListener('pointerdown', unlockAudio, { passive: true }); // phones only allow sound after a first tap
+function chime() {
+  if (!soundOn() || !AC) return;
+  const t = AC.currentTime;
+  [[880, 0], [1320, 0.13]].forEach(([f, d]) => { const o = AC.createOscillator(), g = AC.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.25, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.35); o.connect(g).connect(AC.destination); o.start(t + d); o.stop(t + d + 0.4); });
+  if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+}
+function notifyNew(unread) {
+  if (LAST_UNREAD !== null && unread > LAST_UNREAD) chime();
+  LAST_UNREAD = unread;
+  document.title = (unread ? `(${unread}) ` : '') + 'بوم ميت · لوحة التشغيل';
+}
+ACTS.sound = () => { try { localStorage.setItem('boom-sound', soundOn() ? 'off' : 'on'); } catch (_) { /* private mode */ } unlockAudio(); if (soundOn()) chime(); toast(soundOn() ? 'صوت التنبيهات شغال' : 'صوت التنبيهات اتقفل', 'ok'); const m = document.getElementById('acctmenu'); if (m) m.remove(); };
+// follow the phone's light/dark setting unless the user picked one
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', e => { let picked = null; try { picked = localStorage.getItem('boom-theme'); } catch (_) { /* */ } if (!picked) { document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light'); render(); } });
 ACTS.acctmenu = (_, el) => {
   const ex = document.getElementById('acctmenu'); if (ex) { ex.remove(); return; }
   const u = E.me();
   el.parentElement.insertAdjacentHTML('beforeend', `<div class="menu acct-menu" id="acctmenu" role="menu"><div class="acct-head">${avatar(u, 'av')}<div><b>${esc(u.name)}</b><small>${esc(u.username || '')} · ${E.ROLES[u.role].name}</small></div></div>
     <button data-act="me" role="menuitem">${ic('users')}<span>حسابي: الاسم والصورة</span></button>
+    <button data-act="sound" role="menuitem">${ic('bell')}<span>${soundOn() ? 'صوت التنبيهات: شغال' : 'صوت التنبيهات: مقفول'}</span></button>
     ${LIVE ? `<button class="danger" data-act="logout" role="menuitem">${ic('logout')}<span>تسجيل الخروج</span></button>` : ''}</div>`);
 };
 document.addEventListener('click', e => { const m = document.getElementById('acctmenu'); if (m && !e.target.closest('[data-act="acctmenu"]') && (!e.target.closest('#acctmenu') || e.target.closest('[data-act]'))) setTimeout(() => m.remove()); }, true);
@@ -390,7 +419,7 @@ async function testTelegram(token, chat) {
   const r = await fetch(`https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: '✅ بوم ميت: تنبيهات السيستم اتوصلت بتليجرام' }) });
   const j = await r.json(); if (!j.ok) throw new Error(j.description || 'فشل الإرسال'); return true;
 }
-const TG = { sent: ['ok', 'اتبعت تليجرام'], pending: ['warn', 'في الطريق'], failed: ['bad', 'فشل الإرسال'], noconfig: ['mut', 'تليجرام مش متوصل'], off: ['mut', 'تليجرام متوقف'], demo: ['mut', 'بيانات تجريبية'] };
+const TG = { sent: ['ok', 'اتبعت تليجرام'], pending: ['warn', 'في الطريق'], failed: ['bad', 'فشل الإرسال'], noconfig: ['mut', 'تليجرام مش متوصل'], off: ['mut', 'تليجرام متوقف'], demo: ['mut', 'بيانات تجريبية'], test: ['mut', 'تجربة (مش بيتبعت)'] };
 
 /* ---------- charts (SVG) ---------- */
 function bars(data, { h = 190, color = 'var(--red)', fmt = v => v, stack = null, target = null } = {}) {
@@ -530,7 +559,7 @@ const CFG = window.BOOM_CONFIG || null;
 const LIVE = !!(CFG && CFG.url && CFG.anonKey);
 let SB = null, VERSION = -1, PROFILE = null, PENDING_REQ = 0;
 async function countRequests() { if (!SB || !PROFILE || PROFILE.role !== 'owner') return; const { count } = await SB.from('profiles').select('user_id', { count: 'exact', head: true }).eq('role', 'pending'); PENDING_REQ = count || 0; }
-const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe'];
+const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'decideOrder'];
 let busyN = 0;
 function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"></div>'); if (busyN <= 0 && b) b.remove(); }
 async function api(op, args) {
@@ -624,6 +653,10 @@ async function bootLive() {
   await countRequests().catch(() => {});
   route = parse(); render();
   api('dailyCheck', []).then(async r => { if (r && !r.skipped && r.version !== VERSION) { await loadState(); if (!document.querySelector('.ov')) render(); } }).catch(() => {});
+  const refresh = async () => { try { await SB.auth.getSession(); await loadState(); await countRequests().catch(() => {}); if (!document.querySelector('.ov') && !document.activeElement.matches('input,select,textarea')) render(); } catch (_) { /* offline: try again on the next wake */ } };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+  window.addEventListener('online', refresh);
+  window.addEventListener('pageshow', e => { if (e.persisted) refresh(); });
   SB.channel('erp-ping').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'erp_ping' }, async payload => {
     if (payload.new && payload.new.version > VERSION) { await loadState(); await countRequests().catch(() => {}); if (!document.querySelector('.ov') && !document.activeElement.matches('input,select,textarea')) render(); }
   }).subscribe();
@@ -637,6 +670,9 @@ document.addEventListener('pointermove', e => {
   const el = e.target.closest && e.target.closest('.card,.kpi,.qa'); if (!el) return;
   const r = el.getBoundingClientRect(); el.style.setProperty('--mx', (e.clientX - r.left) + 'px'); el.style.setProperty('--my', (e.clientY - r.top) + 'px');
 }, { passive: true });
+function hideSplash() { const el = document.getElementById('splash'); if (el && !el.classList.contains('done')) { el.classList.add('done'); setTimeout(() => el.remove(), 400); } }
+new MutationObserver((m, o) => { if (document.getElementById('content')?.childElementCount || document.querySelector('#app > .login')) { hideSplash(); o.disconnect(); } }).observe(document.getElementById('app'), { childList: true, subtree: true });
+setTimeout(hideSplash, 12000); // never stay stuck on the splash
 window.UI.boot = () => {
   if (LIVE) { bootLive(); return; }
   E.init(); E.watch(E.today()); E.save(); route = parse(); render(); flushTelegram();

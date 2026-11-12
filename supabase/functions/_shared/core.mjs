@@ -5,7 +5,7 @@
 export const OPS = new Set([
   'purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch',
   'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff',
-  'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck',
+  'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck', 'decideOrder',
 ]);
 
 function syncActor(E, profile) {
@@ -53,6 +53,34 @@ export async function runOp({ E, db, profile, op, args, telegram, maxRetries = 4
     return { status: 200, body: { ok: true, version: v, result: result === undefined ? null : JSON.parse(JSON.stringify(result)) } };
   }
   return { status: 409, body: { error: 'السيستم مشغول بعمليات تانية، جرّب تاني' } };
+}
+
+/* WhatsApp bot endpoint (shared key checked by the caller): read-only catalog/status, and placing pending orders */
+export async function runShop({ E, db, action, body, telegram, maxRetries = 4 }) {
+  const b = body || {};
+  if (action === 'catalog' || action === 'status') {
+    const row = await db.load(); E.setState(row.state);
+    return { status: 200, body: { ok: true, result: action === 'catalog' ? E.catalog(b.phone) : E.orderStatus(b.phone) } };
+  }
+  if (action !== 'order') return { status: 400, body: { error: 'طلب غير معروف' } };
+  const who = { user_id: null, username: 'whatsapp-bot' };
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const row = await db.load();
+    E.setState(row.state); E.S.currentUser = 'bot';
+    let result;
+    try { result = E.placeOrder(b.order || {}); } catch (e) {
+      await db.log({ ...who, op: 'placeOrder', args: b.order || null, ok: false, error: e.message, version: row.version });
+      return { status: 400, body: { error: e.message } };
+    }
+    const pending = (E.S.alerts || []).filter(a => a.tg === 'pending');
+    const v = await db.save(E.S, row.version);
+    if (v == null) continue;
+    await db.log({ ...who, op: 'placeOrder', args: b.order, ok: true, error: null, version: v });
+    if (db.snapshot) { try { await db.snapshot(E.today(), E.S, v); } catch (e) { /* best-effort */ } }
+    if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram });
+    return { status: 200, body: { ok: true, version: v, result } };
+  }
+  return { status: 409, body: { error: 'السيستم مشغول، جرّب تاني' } };
 }
 
 async function deliverAlerts({ E, db, ids, telegram }) {

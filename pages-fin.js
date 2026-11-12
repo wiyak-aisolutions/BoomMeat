@@ -4,6 +4,38 @@
 const U = window.UI, E = U.E, S = U.S;
 const { esc, tx, fm, fm0, kgf, qtyf, pct, df, tf, packName, toG, toP, toI, canCost, isOwner, ic, PAGES, ACTS, page, modal, run, toast, val, table, bars, hbars, partnerOptions, methodOptions, chatter, periodBar, period, tabs, searchBox, match, sumBy, accName } = U;
 
+/* ========== WHATSAPP ORDERS (placed by the bot, approved here → invoice on account; collected on delivery) ========== */
+const OSTAT = { pending: ['warn', 'مستني موافقة'], approved: ['ok', 'متوافق عليه'], rejected: ['bad', 'مرفوض'] };
+const opack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
+PAGES.orders = () => {
+  const s = S(), all = (s.docs.orders || []).slice().reverse();
+  const tb = tabs('ord', [['pending', 'مستنية'], ['approved', 'متوافق عليها'], ['rejected', 'مرفوضة'], ['all', 'الكل']], 'pending');
+  const rows = all.filter(o => (tb.cur === 'all' || o.status === tb.cur) && match('oq', o.no, o.name, o.phone, o.address));
+  const pend = all.filter(o => o.status === 'pending'), unpaid = all.filter(o => o.status === 'approved' && !o.receiptNo);
+  const cols = [
+    { t: 'الطلب', f: o => `<b class="mono">${esc(o.no)}</b>${o.test ? ' <span class="pill mut">تجربة</span>' : ''}<br><small>${tf(o.at)}</small>` },
+    { t: 'العميل', f: o => `<b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<br><a href="https://wa.me/${esc(o.phone.replace(/^0/, '20'))}" target="_blank" rel="noopener" class="mono">${esc(o.phone)}</a>` },
+    { t: 'العنوان', f: o => esc(o.address) + (o.note ? `<br><small>${esc(o.note)}</small>` : '') },
+    { t: 'الأصناف', f: o => o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>') },
+    { t: 'الإجمالي', n: 1, f: o => `<b>${fm(o.total)}</b><br><small>${E.ORDER_METHODS[o.method]}</small>` },
+    { t: 'الحالة', f: o => `<span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>` + (o.invoiceNo ? `<br><a href="#invoice/${esc(o.invoiceId)}">${esc(o.invoiceNo)}</a>` : '') + (o.status === 'approved' ? (o.receiptNo ? ' <span class="pill ok">اتحصّل</span>' : ' <span class="pill warn">لسه متحصلش</span>') : '') + (o.reason ? `<br><small>${esc(o.reason)}</small>` : '') },
+    { t: '', f: o => o.status === 'pending' ? (o.test ? '' : `<button class="btn p sm" data-act="ord-ok" data-arg="${o.id}">${ic('check')} وافق</button> `) + `<button class="btn sm" data-act="ord-no" data-arg="${o.id}">ارفض</button>`
+        + (o.test ? ` <button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button>` : '')
+        : o.test ? `<button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button>`
+        : o.status === 'approved' && !o.receiptNo ? `<button class="btn sm" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} اتحصّل</button>` : '' },
+  ];
+  page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, o => o.total))} ج شامل الضريبة</span></div>
+      <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => o.total))} ج</span></div></div>
+    <div class="note">الطلبات دي جاية من بوت الواتساب. <b>الموافقة</b> بتعمل فاتورة آجل على العميل وبتخصم من الفريزر. ولما الفلوس تتحصّل عند التسليم (كاش أو إنستاباي) دوس <b>اتحصّل</b>.</div>
+    <div class="bar">${tb.html}${searchBox('oq', 'ابحث برقم الطلب أو الاسم أو التليفون')}</div>
+    <div class="card"><div class="bd">${table('ord', cols, rows, { empty: 'مفيش طلبات هنا' })}</div></div>`);
+};
+const ordOf = id => (S().docs.orders || []).find(o => o.id === id);
+ACTS['ord-ok'] = id => { const o = ordOf(id); modal(`موافقة على ${esc(o.no)}`, `<p>هتتعمل فاتورة <b>آجل</b> بـ <b>${fm(o.total)}</b> (شامل الضريبة) على <b>${esc(o.name)}</b>، وهيتخصم من الفريزر:</p><p>${o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>')}</p><p>الدفع عند التسليم: ${E.ORDER_METHODS[o.method]}.</p>`, { saveText: 'وافق واعمل الفاتورة', save: async () => { await E.decideOrder({ id, action: 'approve' }); U.afterChange(); toast('اتوافق على الطلب واتعملت الفاتورة', 'ok'); } }); };
+ACTS['ord-no'] = id => { const o = ordOf(id); modal(`رفض ${esc(o.no)}`, `<label class="fld"><span>السبب (اختياري، بيظهر هنا بس)</span><input class="f" id="ord-reason" maxlength="200" placeholder="مثلاً: العنوان برا منطقة التوصيل"></label>`, { saveText: 'ارفض الطلب', save: async () => { await E.decideOrder({ id, action: 'reject', reason: val('ord-reason') }); U.afterChange(); toast('اترفض الطلب', 'ok'); } }); };
+ACTS['ord-paid'] = id => { const o = ordOf(id); modal(`تحصيل ${esc(o.no)}`, `<p>هيتسجل تحصيل <b>${fm(o.total)}</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]}).</p>`, { saveText: 'سجّل التحصيل', save: async () => { await E.decideOrder({ id, action: 'paid' }); U.afterChange(); toast('اتسجل التحصيل', 'ok'); } }); };
+ACTS['ord-del'] = id => run(() => E.decideOrder({ id, action: 'delete' }), 'اتمسح طلب التجربة');
+
 /* ========== INVOICES ========== */
 PAGES.invoices = () => {
   const s = S(), cost = canCost();
@@ -18,76 +50,96 @@ PAGES.invoices = () => {
   page('الفواتير', `<div class="kpis"><div class="kpi main"><small>المبيعات (${p.label})</small><b>${fm0(net)} <em>ج</em></b><span class="t">${rows.length} فاتورة · ضريبة ${fm0(sumBy(rows, v => v.vat))} ج</span></div>
       <div class="kpi"><small>جملة</small><b>${fm0(sumBy(rows.filter(v => v.kind === 'wholesale'), v => v.net))} <em>ج</em></b></div><div class="kpi"><small>قطاعي</small><b>${fm0(sumBy(rows.filter(v => v.kind === 'retail'), v => v.net))} <em>ج</em></b></div>
       ${cost ? `<div class="kpi"><small>مجمل الربح</small><b>${fm0(net - cst)} <em>ج</em></b><span class="t up">هامش ${pct(net - cst, net)}</span></div>` : ''}</div>
-    <div class="bar">${periodBar('inv', p.k)}${searchBox('iq', 'ابحث برقم الفاتورة أو العميل')}<span class="grow"></span>${['owner', 'sales', 'accountant'].includes(U.role()) ? `<button class="btn p" data-go="newinvoice">${ic('plus')} فاتورة جديدة</button>` : ''}</div>
+    <div class="bar">${periodBar('inv', p.k)}${searchBox('iq', 'ابحث برقم الفاتورة أو العميل')}<span class="grow"></span>${['owner', 'sales', 'accountant'].includes(U.role()) ? `<button class="btn p" data-go="newinvoice">${ic('plus')} بيع جديد</button>` : ''}</div>
     <div class="card"><div class="bd">${table('inv', cols, rows, { onRow: v => 'invoice/' + v.id })}</div></div>`);
 };
 
-const NI = { cust: null, lines: [], method: null, discount: '' };
+/* ===== Sales screen (point of sale): products in stock → cart → confirm → invoice ===== */
+const NI = { cust: null, lines: [], method: null, discount: '', q: '', grp: '' };
+const fgAvail = (id, z) => Math.floor(E.available(id, E.whs('fg'), z) / z);
 PAGES.newinvoice = () => {
   const s = S();
   const custs = s.partners.filter(p => p.type === 'customer');
   if (!NI.cust || !custs.some(c => c.id === NI.cust)) NI.cust = custs[0].id;
   const c = E.partner(NI.cust);
-  if (!NI.lines.length) NI.lines.push({ productId: s.items.find(i => i.cat === 'product').id, packSize: 1000, count: '' });
   const methods = c.terms === 'credit' ? ['credit', 'cash', 'bank', 'instapay'] : ['cash', 'instapay', 'bank'];
   if (!methods.includes(NI.method)) NI.method = methods[0];
-  let gross = 0, cst = 0, err = '';
+  // catalog
   const prods = s.items.filter(i => i.cat === 'product');
-  const lineRows = NI.lines.map((l, k) => {
-    const p = E.item(l.productId);
-    const inStock = E.packsOf(p).filter(z => E.available(p.id, E.whs('fg'), z) >= z);
-    if (!inStock.includes(l.packSize)) l.packSize = inStock[0] || E.packsOf(p)[0]; const price = E.priceFor(p, c); const n = toI(l.count) || 0;
-    const avail = Math.floor(E.available(p.id, E.whs('fg'), l.packSize) / l.packSize);
-    const amt = E.mulDiv(n * l.packSize, price, 1000); gross += amt;
-    if (n > avail) err = `${p.name} ${packName(l.packSize)}: المتاح ${avail} عبوة بس`;
-    // cost estimate by FIFO without consuming
-    if (canCost() && n) { let need = n * l.packSize; for (const lot of S().lots.filter(x => x.itemId === p.id && E.whUse(x.wh) === 'fg' && x.packSize === l.packSize && x.qty > 0).sort((a, b) => a.inDate < b.inDate ? -1 : a.inDate > b.inDate ? 1 : a.n - b.n)) { const t = Math.min(need, lot.qty); cst += t === lot.qty ? lot.value : E.mulDiv(lot.value, t, lot.qty); need -= t; if (!need) break; } }
-    return `<tr><td><select class="f ni-p" data-k="${k}">${prods.map(x => { const has = E.available(x.id, E.whs('fg')) > 0; return `<option value="${x.id}" ${x.id === l.productId ? 'selected' : ''} ${has || x.id === l.productId ? '' : 'disabled'}>${esc(x.name)}${has ? '' : ' · خلص'}</option>`; }).join('')}</select></td>
-      <td><select class="f ni-s" data-k="${k}">${(inStock.length ? inStock : [l.packSize]).map(sz => `<option value="${sz}" ${sz === l.packSize ? 'selected' : ''}>${packName(sz)} · متاح ${Math.floor(E.available(p.id, E.whs('fg'), sz) / sz)}</option>`).join('')}</select></td>
-      <td><input class="f ni-c" data-k="${k}" type="number" min="0" step="1" value="${esc(l.count)}" style="width:90px"></td><td class="n">${kgf(n * l.packSize)} كجم</td><td class="n">${fm(price)}</td><td class="n"><b>${fm(amt)}</b></td>
-      <td><button class="btn sm dan" data-act="ni-del" data-arg="${k}" aria-label="حذف السطر">${ic('x')}</button></td></tr>`;
+  const groups = [...new Set(prods.map(p => p.group).filter(Boolean))];
+  const q = NI.q.trim();
+  const shown = prods.filter(p => (!NI.grp || p.group === NI.grp) && (!q || p.name.includes(q) || (p.code || '').toLowerCase().includes(q.toLowerCase())));
+  const inCart = (id, z) => (NI.lines.find(l => l.productId === id && l.packSize === z) || {}).count || 0;
+  const card = p => {
+    const sizes = E.packsOf(p).filter(z => fgAvail(p.id, z) > 0);
+    const price = E.priceFor(p, c);
+    return `<div class="pc ${sizes.length ? '' : 'out'}"><div class="pc-h"><b>${esc(p.name)}</b><span>${fm0(price)} ج للكيلو</span></div>
+      ${sizes.length ? `<div class="pc-z">${sizes.map(z => { const n = inCart(p.id, z), left = fgAvail(p.id, z) - n; return `<button class="pz ${n ? 'on' : ''}" data-act="ni-plus" data-arg="${p.id}|${z}" ${left > 0 ? '' : 'disabled'} aria-label="ضيف ${esc(p.name)} ${packName(z)}"><b>${packName(z)}</b><small>${n ? `${n} في السلة` : `متاح ${left}`}</small></button>`; }).join('')}</div>`
+        : `<div class="pc-out">مفيش رصيد في الفريزرات. بيتملا لما تتقفل تشغيلة للمنتج ده.</div>`}</div>`;
+  };
+  const sorted = shown.slice().sort((a, b) => (E.available(b.id, E.whs('fg')) > 0) - (E.available(a.id, E.whs('fg')) > 0));
+  // cart
+  let gross = 0, cst = 0, err = '';
+  NI.lines = NI.lines.filter(l => l.count > 0);
+  const rows = NI.lines.map((l, k) => {
+    const p = E.item(l.productId), price = E.priceFor(p, c), avail = fgAvail(p.id, l.packSize);
+    const amt = E.mulDiv(l.count * l.packSize, price, 1000); gross += amt;
+    if (l.count > avail) err = `${p.name} ${packName(l.packSize)}: المتاح ${avail} عبوة بس`;
+    if (canCost()) { let need = l.count * l.packSize; for (const lot of s.lots.filter(x => x.itemId === p.id && E.whUse(x.wh) === 'fg' && x.packSize === l.packSize && x.qty > 0).sort((a, b) => (a.expDate || '') < (b.expDate || '') ? -1 : (a.expDate || '') > (b.expDate || '') ? 1 : a.inDate < b.inDate ? -1 : 1)) { const t = Math.min(need, lot.qty); cst += t === lot.qty ? lot.value : E.mulDiv(lot.value, t, lot.qty); need -= t; if (!need) break; } }
+    return `<div class="ci"><div class="ci-t"><b>${esc(p.name)}</b><small>${packName(l.packSize)} · ${kgf(l.count * l.packSize)} كجم · ${fm0(price)} ج للكيلو</small></div>
+      <div class="ci-q"><button class="qb" data-act="ni-minus" data-arg="${k}" aria-label="قلّل">−</button><input class="f ni-c" data-k="${k}" type="number" inputmode="numeric" min="1" step="1" value="${l.count}" aria-label="العدد"><button class="qb" data-act="ni-plus" data-arg="${p.id}|${l.packSize}" ${l.count < avail ? '' : 'disabled'} aria-label="زوّد">+</button></div>
+      <b class="ci-a">${fm(amt)}</b><button class="ci-x" data-act="ni-del" data-arg="${k}" aria-label="شيل من السلة">${ic('x')}</button></div>`;
   }).join('');
   const disc = toP(NI.discount || '0') || 0;
   const net = gross - disc, vat = Math.round(Math.max(net, 0) * s.settings.vatRate / 100), total = net + vat;
-  page('فاتورة جديدة', `<div class="card"><div class="bd" style="display:flex;flex-direction:column;gap:14px">
-    <div class="fgrid"><label class="fld"><span>العميل</span><select class="f" id="ni-c">${partnerOptions('customer', NI.cust)}</select></label>
-      <label class="fld"><span>قايمة الأسعار</span><input class="f" disabled value="${c.kind === 'wholesale' ? 'جملة (مطاعم ومحلات)' : 'قطاعي (أفراد)'}"></label>
-      <label class="fld"><span>طريقة الدفع</span><select class="f" id="ni-m">${methodOptions(methods, NI.method)}</select></label>
-      <label class="fld"><span>التاريخ</span><input class="f" id="ni-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
-    <div class="tw"><table class="t"><thead><tr><th>المنتج</th><th>العبوة (المتاح)</th><th>العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">القيمة</th><th></th></tr></thead><tbody>${lineRows}</tbody></table></div>
-    <button class="add-line" data-act="ni-add">${ic('plus')} إضافة منتج للفاتورة</button>
-    <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:space-between;align-items:flex-end">
-      <label class="fld" style="max-width:200px"><span>خصم (ج)</span><input class="f" id="ni-x" type="number" min="0" step="1" value="${esc(NI.discount)}"></label>
-      <div class="totals">
-        <div class="tl"><div><span>الإجمالي</span><b>${fm(gross)}</b></div>${gross - net ? `<div><span>الخصم</span><b class="neg">− ${fm(gross - net)}</b></div><div><span>بعد الخصم</span><b>${fm(net)}</b></div>` : ''}<div><span>ضريبة القيمة المضافة ${s.settings.vatRate}%</span><b>${fm(vat)}</b></div>
-          ${canCost() ? `<div class="sep"><span>التكلفة</span><b>${fm(cst)}</b></div><div><span>الربح</span><b style="color:var(--${net - cst >= 0 ? 'ok' : 'bad'})">${fm(net - cst)} <small>(${pct(net - cst, net)})</small></b></div>` : ''}</div>
-        <div class="due"><small>المستحق على العميل</small><b>${fm(total)}</b><em>جنيه</em></div>
-      </div></div>
-    ${err ? `<div class="note bad">${esc(err)}</div>` : ''}
-    <div class="bar"><button class="btn p lg" data-act="ni-save" ${err || !gross ? 'disabled' : ''}>${ic('check')} حفظ الفاتورة وإرسالها للضرايب</button><button class="btn" data-act="ni-reset">مسح</button></div>
-    <div class="crumb">الأسعار من قايمة ${c.kind === 'wholesale' ? 'الجملة' : 'القطاعي'}، والأدمن بس اللي يعدّلها من "الأصناف والأسعار". التكلفة بتتحسب من الدفعات الأقرب في الصلاحية (FEFO).</div>
-  </div></div>`, { crumb: '<a href="#invoices">الفواتير</a> / جديدة' });
+  const count = NI.lines.reduce((a, l) => a + l.count, 0);
+  page('بيع جديد', `<div class="pos">
+    <section class="pos-cat card"><div class="bd">
+      <div class="pos-tools"><input class="f" id="ni-q" type="search" placeholder="ابحث باسم المنتج" value="${esc(NI.q)}" aria-label="ابحث باسم المنتج">
+        <div class="seg pos-g"><button class="${NI.grp ? '' : 'on'}" data-act="ni-grp" data-arg="">الكل</button>${groups.map(g => `<button class="${NI.grp === g ? 'on' : ''}" data-act="ni-grp" data-arg="${esc(g)}">${esc(g)}</button>`).join('')}</div></div>
+      <div class="pcs">${sorted.map(card).join('') || '<div class="empty">مفيش منتج بالاسم ده</div>'}</div>
+    </div></section>
+    <aside class="pos-cart card" id="cart"><div class="bd">
+      <div class="hd" style="padding:0 0 10px"><h3>السلة</h3><span class="sub">${count ? count + ' عبوة' : 'فاضية'}</span>${count ? '<div class="tools"><button class="btn sm" data-act="ni-reset">فضّي السلة</button></div>' : ''}</div>
+      <div class="fgrid one"><label class="fld"><span>العميل</span><select class="f" id="ni-c">${partnerOptions('customer', NI.cust)}</select></label>
+        <div class="pos-meta"><span class="pill ${c.kind === 'wholesale' ? 'info' : 'warn'}">${c.kind === 'wholesale' ? 'أسعار الجملة' : 'أسعار القطاعي'}</span>${E.partnerBalance && c.terms === 'credit' ? `<span class="pill mut">عليه ${fm0(E.partnerBalance(c.id))} ج</span>` : ''}</div>
+        <div class="fgrid two"><label class="fld"><span>الدفع</span><select class="f" id="ni-m">${methodOptions(methods, NI.method)}</select></label>
+        <label class="fld"><span>التاريخ</span><input class="f" id="ni-d" type="date" value="${E.today()}" max="${E.today()}"></label></div></div>
+      <div class="cis">${rows || '<div class="empty cart-empty">دوس على حجم العبوة في أي منتج عشان يتضاف هنا.</div>'}</div>
+      ${count ? `<label class="fld"><span>خصم (ج)</span><input class="f" id="ni-x" type="number" inputmode="decimal" min="0" step="1" value="${esc(NI.discount)}"></label>
+      <div class="tl cart-tl"><div><span>الإجمالي</span><b>${fm(gross)}</b></div>${disc ? `<div><span>الخصم</span><b class="neg">− ${fm(disc)}</b></div>` : ''}<div><span>ضريبة ${s.settings.vatRate}%</span><b>${fm(vat)}</b></div>
+        ${canCost() ? `<div class="sep"><span>التكلفة · الربح</span><b>${fm0(cst)} · <span style="color:var(--${net - cst >= 0 ? 'ok' : 'bad'})">${fm0(net - cst)} (${pct(net - cst, net)})</span></b></div>` : ''}</div>
+      <div class="due"><small>المطلوب من العميل</small><b>${fm(total)} <em>ج</em></b></div>
+      ${err ? `<div class="note bad">${esc(err)}</div>` : ''}
+      <button class="btn p lg pos-ok" data-act="ni-save" ${err ? 'disabled' : ''}>${ic('check')} تأكيد الأوردر وطباعة الفاتورة</button>` : ''}
+    </div></aside>
+    ${count ? `<button class="pos-bar" data-act="ni-cart"><span>${ic('bill')} السلة · ${count} عبوة</span><b>${fm(total)} ج</b></button>` : ''}
+  </div>`, { crumb: '<a href="#invoices">الفواتير</a> / بيع جديد' });
   const mb = U.content();
   document.getElementById('ni-c').onchange = e => { NI.cust = e.target.value; NI.method = null; U.render(); };
   document.getElementById('ni-m').onchange = e => { NI.method = e.target.value; };
-  document.getElementById('ni-x').onchange = e => { NI.discount = e.target.value; U.render(); };
-  mb.querySelectorAll('.ni-p').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].productId = el.value; U.render(); }; });
-  mb.querySelectorAll('.ni-s').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].packSize = +el.value; U.render(); }; });
-  mb.querySelectorAll('.ni-c').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].count = el.value; U.render(); }; });
+  const x = document.getElementById('ni-x'); if (x) x.onchange = e => { NI.discount = e.target.value; U.render(); };
+  const qi = document.getElementById('ni-q'); let tq; qi.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { NI.q = e.target.value; U.render(); const n = document.getElementById('ni-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+  mb.querySelectorAll('.ni-c').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].count = Math.max(0, toI(el.value) || 0); U.render(); }; });
 };
-ACTS['ni-add'] = () => { NI.lines.push({ productId: S().items.find(i => i.cat === 'product').id, packSize: 1000, count: '' }); U.render(); };
+ACTS['ni-plus'] = arg => { const [id, z] = arg.split('|'); const l = NI.lines.find(x => x.productId === id && x.packSize === +z); if (l) l.count++; else NI.lines.push({ productId: id, packSize: +z, count: 1 }); U.render(); };
+ACTS['ni-minus'] = k => { const l = NI.lines[+k]; if (l) l.count--; U.render(); };
 ACTS['ni-del'] = k => { NI.lines.splice(+k, 1); U.render(); };
+ACTS['ni-grp'] = g => { NI.grp = g || ''; U.render(); };
 ACTS['ni-reset'] = () => { NI.lines = []; NI.discount = ''; U.render(); };
+ACTS['ni-cart'] = () => document.getElementById('cart').scrollIntoView({ behavior: 'smooth', block: 'start' });
 ACTS['ni-save'] = async () => {
-  const lines = NI.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: toI(l.count) || 0 }));
-  const v = await run(() => E.invoice({ date: val('ni-d'), customerId: NI.cust, lines, discount: toP(NI.discount || '0') || 0, method: NI.method }), 'اتحفظت الفاتورة');
-  if (v) { NI.lines = []; NI.discount = ''; U.go('invoice', v.id); }
+  const lines = NI.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: l.count }));
+  const v = await run(() => E.invoice({ date: val('ni-d'), customerId: NI.cust, lines, discount: toP(NI.discount || '0') || 0, method: NI.method }), 'اتأكد الأوردر واتعملت الفاتورة');
+  if (v) { NI.lines = []; NI.discount = ''; INV_PRINT = v.id; U.go('invoice', v.id); }
 };
+let INV_PRINT = null; // open the print dialog once, right after a sale is confirmed
 
 PAGES.invoice = id => {
   const s = S(), v = s.docs.invoices.find(x => x.id === id); if (!v) { U.go('invoices'); return; }
+  if (INV_PRINT === id) { INV_PRINT = null; setTimeout(() => window.print(), 450); }
   const c = E.partner(v.customerId), co = s.settings.company;
-  page(`فاتورة ${esc(v.no)}`, `<div class="bar no-print"><button class="btn p" data-act="print">${ic('print')} طباعة</button><button class="btn" data-go="newinvoice">فاتورة جديدة</button>${canCost() ? `<span class="pill mut">التكلفة ${fm(v.cost)} · الربح ${fm(v.net - v.cost)}</span>` : ''}<span class="pill mut">القيد ${esc(v.je)}${v.paidJe ? ' · ' + esc(v.paidJe) : ''}</span></div>
+  page(`فاتورة ${esc(v.no)}`, `<div class="bar no-print"><button class="btn p" data-act="print">${ic('print')} طباعة</button><button class="btn" data-go="newinvoice">بيع جديدة</button>${canCost() ? `<span class="pill mut">التكلفة ${fm(v.cost)} · الربح ${fm(v.net - v.cost)}</span>` : ''}<span class="pill mut">القيد ${esc(v.je)}${v.paidJe ? ' · ' + esc(v.paidJe) : ''}</span></div>
     <div class="inv">
       <div class="inv-h"><div><img src="boom-logo.png" alt="Boom Meat"><div><b>${esc(co.name)}</b></div><small>${esc(co.address)}</small><br><small>رقم التسجيل الضريبي: ${esc(co.taxId)}</small><br><small dir="ltr">${esc(co.phone)}</small></div>
         <div class="r"><b style="font-size:20px">فاتورة ضريبية</b><div>رقم: <span class="mono">${esc(v.no)}</span></div><div>التاريخ: ${esc(v.date)}</div><div>${esc(v.at.slice(11, 16))}</div></div></div>

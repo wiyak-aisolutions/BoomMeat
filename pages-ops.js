@@ -69,7 +69,7 @@ PAGES.home = () => {
   const cashSeries = []; { let run = cashNow; for (let i = 0; i < 14; i++) { const d = E.addDays(t, -i); cashSeries.unshift(run); run -= cashDelta[d] || 0; } }
   page('نظرة عامة', `
     <div class="card hero"><button class="me-btn" data-act="me" aria-label="حسابي">${U.avatar(E.me(), 'hero-av')}</button><div style="min-width:0"><h2>${greet}، ${esc(E.me().name)}</h2><p>${U.dfl(t)}</p>
-      <div class="chips"><span class="chip"><b>${fm0(sumBy(invT, v => v.total))} ج</b> مبيعات النهارده</span><span class="chip"><b>${invT.length}</b> فاتورة</span><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
+      <div class="chips"><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
       ${cost ? `<span data-go="reports" class="pill ${allOk ? 'ok' : 'bad'}" role="button" tabindex="0" style="cursor:pointer">${allOk ? '✓ الحسابات متوازنة والمخزون مطابق' : '✗ فيه فرق في الحسابات'}</span>` : ''}</div>
     ${quick.length ? `<div class="qas">${quick.map((q, i) => `<button class="qa ${i % 2 ? 'y' : ''}" data-act="quick" data-arg="${q[0]}"><i>${ic(q[3])}</i><span><b>${q[1]}</b><small>${q[2]}</small></span></button>`).join('')}</div>` : ''}
     <div class="sec-title"><h2>${cost ? 'الأرقام' : 'الإنتاج'}</h2></div>
@@ -158,7 +158,7 @@ PAGES.flow = () => {
 /* ========== ALERTS ========== */
 PAGES.alerts = () => {
   const s = S(); const tb = tabs('al', [['new', 'الجديدة'], ['all', 'الكل'], ['live', 'المخزون والصلاحية دلوقتي']], 'new');
-  const KIND = { limit: 'تجاوز حد الصرف', correction: 'طلب تصحيح', low: 'صنف قرب يخلص', exp: 'صلاحية', request: 'طلب حساب' };
+  const KIND = { limit: 'تجاوز حد الصرف', correction: 'طلب تصحيح', low: 'صنف قرب يخلص', exp: 'صلاحية', request: 'طلب حساب', order: 'طلب واتساب' };
   let body;
   if (tb.cur === 'live') {
     const live = E.stockAlerts();
@@ -167,7 +167,7 @@ PAGES.alerts = () => {
     const rows = s.alerts.filter(a => tb.cur === 'all' || !a.read).slice().reverse();
     body = table('al', [
       { t: 'الوقت', f: a => tf(a.at) }, { t: 'النوع', f: a => `<span class="pill ${a.level === 'bad' ? 'bad' : a.level === 'warn' ? 'warn' : 'info'}">${KIND[a.kind] || a.kind}</span>` },
-      { t: 'التنبيه', f: a => tx(a.text) + (a.ref && a.ref.type === 'batch' ? ` <a href="#batch/${esc(a.ref.id)}">فتح</a>` : '') + (a.kind === 'request' && isOwner() ? ` <a href="#users">موافقة</a>` : '') },
+      { t: 'التنبيه', f: a => tx(a.text) + (a.ref && a.ref.type === 'batch' ? ` <a href="#batch/${esc(a.ref.id)}">فتح</a>` : '') + (a.kind === 'request' && isOwner() ? ` <a href="#users">موافقة</a>` : '') + (a.kind === 'order' ? ` <a href="#orders">فتح</a>` : '') },
       { t: 'تليجرام', f: a => { const x = TG[a.tg] || ['mut', '—']; return `<span class="pill ${x[0]}" title="${esc(a.tgErr || '')}">${x[1]}</span>`; } },
       { t: '', f: a => a.read ? '<span class="pill mut">مقروء</span>' : `<button class="btn sm" data-act="al-read" data-arg="${a.id}">تم</button>` },
     ], rows, { empty: 'مفيش تنبيهات جديدة' });
