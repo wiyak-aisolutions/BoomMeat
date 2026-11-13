@@ -18,7 +18,7 @@ const ACCOUNTS = [
   ['1304', 'إنتاج تحت التشغيل', '12'], ['1305', 'مخزون المنتج التام', '12'], ['1401', 'ضريبة القيمة المضافة على المشتريات', '12'],
   ['2', 'الخصوم', null], ['21', 'الخصوم المتداولة', '2'], ['2101', 'الموردين', '21'], ['2102', 'ضريبة القيمة المضافة على المبيعات', '21'],
   ['3', 'حقوق الملكية', null], ['3101', 'رأس المال', '3'], ['3201', 'الأرباح المحتجزة', '3'],
-  ['4', 'الإيرادات', null], ['4101', 'مبيعات قطاعي (أفراد)', '4'], ['4102', 'مبيعات جملة (مطاعم ومحلات)', '4'],
+  ['4', 'الإيرادات', null], ['4101', 'مبيعات قطاعي (أفراد)', '4'], ['4102', 'مبيعات جملة (مطاعم ومحلات)', '4'], ['4103', 'إيراد التوصيل', '4'],
   ['5', 'التكاليف والمصروفات', null], ['51', 'تكلفة المبيعات', '5'], ['5101', 'تكلفة البضاعة المباعة', '51'],
   ['52', 'مصروفات المصنع', '5'], ['5102', 'هالك وتالف المخزون', '52'], ['5201', 'أجور الإنتاج', '52'], ['5202', 'كهرباء ومياه المصنع', '52'], ['5203', 'صيانة', '52'],
   ['53', 'مصروفات البيع والتسويق', '5'], ['5301', 'تسويق وإعلانات', '53'], ['5302', 'نقل وتوصيل', '53'],
@@ -417,7 +417,7 @@ function closeBatch({ batchId, date, packs, split }) {
 
 function priceFor(p, cust) { return cust.kind === 'wholesale' ? p.priceWholesale : p.priceRetail; }
 let orderCredit = false; // set only while decideOrder approves a WhatsApp order (pay on delivery)
-function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = false }) {
+function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = false, deliveryFee = 0 }) {
   return tx(() => {
     perm('sales', 'accountant'); checkDate(date);
     const c = partner(customerId); need(c.type === 'customer', 'اختار عميل');
@@ -443,9 +443,11 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
       doc.gross += amount; doc.cost += cost;
     }
     need(discount <= doc.gross, 'الخصم أكبر من قيمة الفاتورة');
+    need(isInt(deliveryFee) && deliveryFee >= 0 && (!deliveryFee || vatIncluded), 'رسوم التوصيل غير صحيحة');
     if (vatIncluded) { // price already includes VAT (WhatsApp orders): split it out
-      doc.vatIncluded = true; doc.total = doc.gross - discount;
+      doc.vatIncluded = true; doc.deliveryFee = deliveryFee; doc.total = doc.gross - discount + deliveryFee;
       doc.net = mulDiv(doc.total, 100, 100 + S.settings.vatRate); doc.vat = doc.total - doc.net;
+      doc.deliveryNet = deliveryFee ? mulDiv(deliveryFee, 100, 100 + S.settings.vatRate) : 0;
     } else {
       doc.net = doc.gross - discount;
       doc.vat = Math.round(doc.net * S.settings.vatRate / 100);
@@ -454,7 +456,7 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
     const revAcc = c.kind === 'wholesale' ? '4102' : '4101';
     const ref = { type: 'invoice', id: doc.id, no };
     doc.je = post({ date, type: 'sale', ref, memo: `فاتورة بيع ${no} · ${c.name}`, lines: [
-      { acc: '1201', dr: doc.total, partner: c.id }, { acc: revAcc, cr: doc.net }, { acc: '2102', cr: doc.vat },
+      { acc: '1201', dr: doc.total, partner: c.id }, { acc: revAcc, cr: doc.net - (doc.deliveryNet || 0) }, ...(doc.deliveryNet ? [{ acc: '4103', cr: doc.deliveryNet }] : []), { acc: '2102', cr: doc.vat },
       { acc: '5101', dr: doc.cost }, { acc: '1305', cr: doc.cost }] }).no;
     if (method !== 'credit') {
       doc.paidJe = post({ date, type: 'receipt', ref, memo: `تحصيل فاتورة ${no} (${METHOD_NAME[method]})`, lines: [{ acc: METHOD_ACC[method], dr: doc.total }, { acc: '1201', cr: doc.total, partner: c.id }] }).no;
@@ -504,6 +506,7 @@ function orderStatus(phone) {
   const n = normPhone(phone);
   return orders().filter(o => o.phone === n).slice(-3).map(o => ({ no: o.no, status: o.status, total: egpOf(o.total), at: o.at, reason: o.reason || '' }));
 }
+function olog(o, action, note) { (o.log || (o.log = [])).push({ at: stamp(today()), by: S.currentUser, action, note: String(note || '').slice(0, 200) }); if (o.log.length > 100) o.log.splice(0, o.log.length - 100); }
 function placeOrder({ phone, name, address, method, lines, note, test, expectTotal }) {
   return tx(() => { // no perm(): only the shop endpoint (shared key) reaches this; it is not in the dashboard op list
     const ph = normPhone(phone);
@@ -530,15 +533,48 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
       o.lines.push({ productId: p.id, name: p.name, packSize: ln.packSize, count: ln.count, qty, pricePerKg, amount }); o.total += amount;
     }
     if (expectTotal != null) need(Math.round(expectTotal * 100) === o.total, `السعر اتغير: الإجمالي الصح ${money(o.total)}`);
+    olog(o, 'placed', `${o.lines.length} صنف · ${money(o.total)} · ${ORDER_METHODS[method]}`);
     orders().push(o);
     const pack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
     alert('info', 'order', `🛒 طلب واتساب ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${ph}\n${o.address}\n${o.lines.map(l => `• ${l.count} × ${l.name} ${pack(l.packSize)} = ${money(l.amount)}`).join('\n')}\nالإجمالي ${money(o.total)} شامل الضريبة · ${ORDER_METHODS[method]}${kind === 'wholesale' ? ' · عميل جملة' : ''}\nمستني موافقة من «طلبات واتساب»`, { type: 'order', id: o.id, no: o.no });
     if (o.test) S.alerts[S.alerts.length - 1].tg = 'test'; // test orders never reach the owner's Telegram
     audit('order', o.no, `طلب واتساب ${o.no} من ${o.name}: ${money(o.total)}${o.test ? ' (تجربة)' : ''}`);
-    return { no: o.no, total: egpOf(o.total), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })) };
+    return { id: o.id, no: o.no, method, total: egpOf(o.total), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })) };
   });
 }
-function decideOrder({ id, action, reason }) {
+function proofTarget(phone) { // the customer's latest InstaPay order that still waits for money
+  const ph = normPhone(phone);
+  return orders().filter(o => o.phone === ph && o.method === 'instapay' && !o.receiptNo && o.status !== 'rejected').slice(-1)[0] || null;
+}
+function orderProof({ phone, path }) {
+  return tx(() => {
+    const o = proofTarget(phone); need(o, 'مفيش طلب إنستاباي مستني تحويل على الرقم ده');
+    need(typeof path === 'string' && /^orders\/[\w-]+\/[\w.-]+$/.test(path), 'مسار الصورة غير صحيح');
+    o.proof = { path, at: stamp(today()), status: 'pending' }; olog(o, 'proof', 'صورة تحويل إنستاباي');
+    audit('order_proof', o.no, `صورة تحويل لطلب ${o.no}`);
+    return { id: o.id, no: o.no, test: o.test, name: o.name, phone: o.phone, total: egpOf(o.total) };
+  });
+}
+function orderNotified({ id, kind }) {
+  return tx(() => {
+    const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
+    need(['approved', 'paid', 'resend', 'nopay', 'rejected'].includes(kind), 'نوع الرسالة غير معروف');
+    if (['approved', 'paid', 'resend'].includes(kind) && o.invoiceId) { o.invoiceSentAt = stamp(today()); olog(o, 'invoice_sent', kind); }
+    else olog(o, 'confirm_sent', kind);
+    return { ok: true };
+  });
+}
+function orderView(id) { // read-only: what the bot needs to message the customer
+  const o = orders().find(x => x.id === id); if (!o) return null;
+  const inv = o.invoiceId ? S.docs.invoices.find(v => v.id === o.invoiceId) : null;
+  return { id: o.id, no: o.no, status: o.status, test: !!o.test, phone: o.phone, name: o.name, address: o.address, method: o.method, methodName: ORDER_METHODS[o.method], paid: !!o.receiptNo, reason: o.reason || '',
+    lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })), total: egpOf(o.total),
+    invoice: inv ? { no: inv.no, date: inv.date, net: egpOf(inv.net), vat: egpOf(inv.vat), total: egpOf(inv.total), vatRate: S.settings.vatRate, deliveryFee: egpOf(inv.deliveryFee || 0) } : null,
+    delivery: o.delivery ? { fee: egpOf(o.delivery.fee || 0), eta: (o.delivery.eta && o.delivery.eta.text) || '', note: o.delivery.note || '' } : null,
+    paidAmount: egpOf(o.receiptNo && inv ? inv.total : o.paidAmount || 0), due: inv ? egpOf(Math.max(0, inv.total - (o.receiptNo ? inv.total : o.paidAmount || 0))) : null,
+    receiptNo: o.receiptNo || '', sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt };
+}
+function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
   return tx(() => {
     perm('sales', 'accountant');
     const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
@@ -547,9 +583,20 @@ function decideOrder({ id, action, reason }) {
     if (action === 'reject') {
       need(o.status === 'pending', 'الطلب ده اتعامل معاه قبل كده');
       Object.assign(o, { status: 'rejected', reason: String(reason || '').trim().slice(0, 200), decidedBy: S.currentUser, decidedAt: stamp(T) });
+      olog(o, 'rejected', o.reason);
       audit('order_reject', o.no, `رفض طلب واتساب ${o.no}${o.reason ? ': ' + o.reason : ''}`); return o;
     }
-    if (action === 'approve') {
+    const cleanEta = e => { if (!e) return null; const text = String(e.text || '').trim(); need(text.length >= 2 && text.length <= 80, 'اكتب ميعاد التوصيل'); const at = e.at ? String(e.at) : ''; need(!at || /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(at), 'ميعاد التوصيل غير صحيح'); return at ? { text, at } : { text }; };
+    const cleanNote = n => String(n || '').trim().slice(0, 160);
+    const invOf = () => S.docs.invoices.find(v => v.id === o.invoiceId);
+    const collect = (amount, memo) => { // record money from the customer against this order's invoice
+      const inv = invOf(), due = inv.total - (o.paidAmount || 0); amount = Math.min(amount, due); if (amount <= 0) return null;
+      const rc = receipt({ date: T, customerId: o.customerId, amount, method: o.method, memo: `طلب واتساب ${o.no}${memo ? ' · ' + memo : ''}` });
+      o.paidAmount = (o.paidAmount || 0) + amount; (o.receipts = o.receipts || []).push(rc.no);
+      if (o.paidAmount >= inv.total) Object.assign(o, { receiptNo: rc.no, paidAt: stamp(T), paidBy: S.currentUser });
+      olog(o, 'paid', `${METHOD_NAME[o.method]} · ${rc.no} · ${money(amount)}${o.paidAmount < inv.total ? ` · باقي ${money(inv.total - o.paidAmount)}` : ''}`); return rc;
+    };
+    const approve = () => {
       need(o.status === 'pending', 'الطلب ده اتعامل معاه قبل كده'); need(!o.test, 'ده طلب تجربة: ارفضه أو امسحه');
       let c = (o.customerId && S.partners.find(p => p.id === o.customerId)) || customerByPhone(o.phone);
       if (!c) {
@@ -560,16 +607,49 @@ function decideOrder({ id, action, reason }) {
       const changed = o.lines.filter(l => l.pricePerKg !== priceFor(item(l.productId), c));
       if (changed.length) need(me().role === 'owner', `السعر اتغير من وقت الطلب (${changed.map(l => l.name).join('، ')}). المالك بس يقدر يوافق بسعر الطلب`);
       let inv; orderCredit = true;
-      try { inv = invoice({ date: T, customerId: c.id, lines: o.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: l.count, pricePerKg: l.pricePerKg })), method: 'credit', vatIncluded: true }); } finally { orderCredit = false; }
+      const fee = deliveryFee == null ? 0 : deliveryFee; need(isInt(fee) && fee >= 0 && fee <= 500000, 'رسوم التوصيل غير صحيحة');
+      const when = cleanEta(eta);
+      try { inv = invoice({ date: T, customerId: c.id, lines: o.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: l.count, pricePerKg: l.pricePerKg })), method: 'credit', vatIncluded: true, deliveryFee: fee }); } finally { orderCredit = false; }
+      o.delivery = { fee, eta: when, note: cleanNote(note), setBy: S.currentUser, setAt: stamp(T) };
+      olog(o, 'delivery', `${fee ? 'توصيل ' + money(fee) : 'توصيل مجاني'}${when ? ' · ' + when.text : ''}`);
       Object.assign(o, { status: 'approved', customerId: c.id, invoiceId: inv.id, invoiceNo: inv.no, decidedBy: S.currentUser, decidedAt: stamp(T) });
-      audit('order_approve', o.no, `موافقة على طلب واتساب ${o.no} ← فاتورة ${inv.no}`); return o;
+      olog(o, 'approved', `فاتورة ${inv.no}`);
+      audit('order_approve', o.no, `موافقة على طلب واتساب ${o.no} ← فاتورة ${inv.no}`);
+    };
+    if (action === 'approve') { approve(); if (o.proof && o.proof.status === 'ok') collect(o.total, 'تحويل إنستاباي'); return o; }
+    if (action === 'proofok') { // the owner checked the InstaPay transfer: it arrived
+      need(o.proof && o.proof.status === 'pending' && !o.receiptNo, 'مفيش صورة تحويل مستنية مراجعة');
+      o.proof.status = 'ok'; olog(o, 'proof', 'التحويل وصل');
+      if (o.status === 'approved') collect(o.total, 'تحويل إنستاباي');
+      return o;
+    }
+    if (action === 'send') { // send the customer the confirmation, delivery time and (when paid) the invoice
+      need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول'); need(!o.test, 'ده طلب تجربة');
+      if (eta) { o.delivery = Object.assign(o.delivery || {}, { eta: cleanEta(eta), note: cleanNote(note) }); }
+      o.sentAt = stamp(T); o.sentBy = S.currentUser; if (o.receiptNo) o.invoiceSentAt = o.sentAt;
+      olog(o, 'send', o.receiptNo ? 'التأكيد والفاتورة' : 'التأكيد وميعاد التوصيل'); return o;
+    }
+    if (action === 'eta') {
+      need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول');
+      o.delivery = Object.assign(o.delivery || {}, { eta: cleanEta(eta), note: note == null ? (o.delivery || {}).note || '' : cleanNote(note) });
+      olog(o, 'edited', `ميعاد التوصيل اتغير: ${o.delivery.eta.text}`); return o;
     }
     if (action === 'paid') {
-      need(o.status === 'approved' && !o.receiptNo, 'الطلب لازم يكون متوافق عليه ولسه متحصلش');
-      const inv = S.docs.invoices.find(v => v.id === o.invoiceId);
-      const rc = receipt({ date: T, customerId: o.customerId, amount: inv.total, method: o.method, memo: `طلب واتساب ${o.no}` });
-      Object.assign(o, { receiptNo: rc.no, paidAt: stamp(T) }); return o;
+      need(!o.receiptNo, 'الطلب ده اتحصّل قبل كده');
+      if (o.status === 'pending') { // InstaPay confirmed before review (Telegram «وصلت»): only mark the transfer, the invoice waits for the review
+        need(o.proof && o.proof.status !== 'rejected', 'الطلب لازم يتوافق عليه الأول');
+        o.proof.status = 'ok'; olog(o, 'proof', 'التحويل وصل'); return o;
+      }
+      need(o.status === 'approved', 'الطلب لازم يكون متوافق عليه');
+      if (o.proof && o.proof.status === 'pending') o.proof.status = 'ok';
+      collect(invOf().total, o.paidAmount ? 'الباقي عند الاستلام' : ''); if (o.sentAt && o.receiptNo) o.invoiceSentAt = stamp(T);
+      return o;
     }
+    if (action === 'nopay') { // the transfer screenshot did not match a real transfer
+      need(o.proof && !o.receiptNo, 'مفيش صورة تحويل مستنية مراجعة');
+      o.proof.status = 'rejected'; olog(o, 'proof_rejected', String(reason || 'التحويل موصلش').slice(0, 200)); return o;
+    }
+    if (action === 'resend') { need(o.status === 'approved' && o.invoiceId, 'الفاتورة بتتبعت بعد الموافقة'); olog(o, 'edited', 'طلب إعادة إرسال الفاتورة'); return o; }
     fail('عملية غير معروفة');
   });
 }
@@ -879,8 +959,8 @@ function trialBalance({ from, to }) {
 }
 function incomeStatement({ from, to }) {
   const m = ledger({ from, to });
-  const r = { retail: bal(m, '4101'), wholesale: bal(m, '4102') };
-  r.revenue = r.retail + r.wholesale;
+  const r = { retail: bal(m, '4101'), wholesale: bal(m, '4102'), delivery: bal(m, '4103') };
+  r.revenue = r.retail + r.wholesale + r.delivery;
   r.cogs = bal(m, '5101');
   r.gross = r.revenue - r.cogs;
   r.factory = ['5102', '5201', '5202', '5203'].map(c => ({ code: c, amount: bal(m, c) }));
@@ -1323,7 +1403,7 @@ root.ERP = {
   ACCOUNTS, LEAF, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
   item, partner, userName, whName, me, available, cashBalance, partnerBalance, partnerStatement, batchById, issuedOf, priceFor, monthlyDepreciation,
-  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
+  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
   saveItem, savePartner, resetBooks, updateSelf, saveWarehouse, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
   ledger, bal, trialBalance, incomeStatement, balanceSheet, manufacturingAccount, integrity, stockAlerts, fmtQty, money, accType, debitNature, leafUnder,
 };

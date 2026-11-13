@@ -58,24 +58,32 @@ export async function runOp({ E, db, profile, op, args, telegram, maxRetries = 4
 /* WhatsApp bot endpoint (shared key checked by the caller): read-only catalog/status, and placing pending orders */
 export async function runShop({ E, db, action, body, telegram, maxRetries = 4 }) {
   const b = body || {};
-  if (action === 'catalog' || action === 'status') {
+  if (action === 'catalog' || action === 'status' || action === 'orderInfo' || action === 'proofTarget') {
     const row = await db.load(); E.setState(row.state);
-    return { status: 200, body: { ok: true, result: action === 'catalog' ? E.catalog(b.phone) : E.orderStatus(b.phone) } };
+    let result;
+    if (action === 'catalog') result = E.catalog(b.phone);
+    else if (action === 'status') result = E.orderStatus(b.phone);
+    else if (action === 'orderInfo') { result = E.orderView(String(b.id || '')); if (!result) return { status: 404, body: { error: 'الطلب غير موجود' } }; }
+    else { const o = E.proofTarget(b.phone); result = o ? { id: o.id, no: o.no, test: !!o.test } : null; }
+    return { status: 200, body: { ok: true, result } };
   }
-  if (action !== 'order') return { status: 400, body: { error: 'طلب غير معروف' } };
+  // writes the bot may do: place an order, attach a transfer screenshot, record that a message went out
+  const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind })] };
+  if (!WRITES[action]) return { status: 400, body: { error: 'طلب غير معروف' } };
+  const [fn, argsOf] = WRITES[action];
   const who = { user_id: null, username: 'whatsapp-bot' };
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const row = await db.load();
     E.setState(row.state); E.S.currentUser = 'bot';
     let result;
-    try { result = E.placeOrder(b.order || {}); } catch (e) {
-      await db.log({ ...who, op: 'placeOrder', args: b.order || null, ok: false, error: e.message, version: row.version });
+    try { result = E[fn](argsOf()); } catch (e) {
+      await db.log({ ...who, op: fn, args: argsOf(), ok: false, error: e.message, version: row.version });
       return { status: 400, body: { error: e.message } };
     }
     const pending = (E.S.alerts || []).filter(a => a.tg === 'pending');
     const v = await db.save(E.S, row.version);
     if (v == null) continue;
-    await db.log({ ...who, op: 'placeOrder', args: b.order, ok: true, error: null, version: v });
+    await db.log({ ...who, op: fn, args: argsOf(), ok: true, error: null, version: v });
     if (db.snapshot) { try { await db.snapshot(E.today(), E.S, v); } catch (e) { /* best-effort */ } }
     if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram });
     return { status: 200, body: { ok: true, version: v, result } };

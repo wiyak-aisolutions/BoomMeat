@@ -3,7 +3,9 @@
 // approvals only count from the owner's linked chat, and requests are validated and capped.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
-import { syncUser } from '../_shared/core.mjs';
+import { syncUser, runOp } from '../_shared/core.mjs';
+import { notifyBot } from '../_shared/notify.ts';
+import { ownerReply } from '../_shared/ownerbot.mjs';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
@@ -66,6 +68,61 @@ async function requestAccount(b: Record<string, string>) {
 
 async function ownerProfile() { const { data } = await admin.from('profiles').select('*').eq('role', 'owner').eq('active', true).limit(1).maybeSingle(); return data; }
 
+// "وصلت ✅" / "موصلتش ❌" under an InstaPay screenshot: confirm or refuse the payment as the owner, then tell the customer
+// deno-lint-ignore no-explicit-any
+async function payDecision(cq: any, chat: string) {
+  const [, ans, id] = String(cq.data).split(':');
+  const owner = await ownerProfile();
+  if (!owner) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مفيش حساب مالك' }); return; }
+  const r = await runOp({ E, db, profile: owner, op: 'decideOrder', args: [{ id, action: ans === 'ok' ? 'paid' : 'nopay', reason: ans === 'ok' ? '' : 'المالك: التحويل موصلش' }], telegram: async (c: string, text: string) => { const j = await tg('sendMessage', { chat_id: c, text }); return j && j.ok ? { ok: true } : { ok: false, error: 'فشل الإرسال' }; } });
+  const no = (r.body?.result?.no) || id;
+  if (r.status !== 200) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: String(r.body?.error || 'تعذر').slice(0, 190), show_alert: true }); return; }
+  const res = r.body?.result || {};
+  // «وصلت» on a pending order only confirms the transfer; the invoice goes out after the review in the dashboard
+  await notifyBot(admin, id, ans !== 'ok' ? 'nopay' : res.status === 'pending' ? 'proofok' : (res.receiptNo && res.sentAt ? 'paid' : 'proofok'));
+  const caption = String(cq.message?.caption || '') + (ans === 'ok' ? (res.status === 'pending' ? '\n\n✅ التحويل وصل · الطلب مستني المراجعة في السيستم (التوصيل والميعاد) قبل ما الفاتورة تتبعت' : `\n\n✅ التحويل وصل · ${res.receiptNo ? 'اتسجل الدفع' : 'اتسجل جزء من الدفع'}`) : '\n\n❌ التحويل موصلش · اتطلب من العميل يبعت تاني');
+  await tg('editMessageCaption', { chat_id: chat, message_id: cq.message.message_id, caption: caption.slice(0, 1000) });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: ans === 'ok' ? 'اتسجل الدفع ✅' : 'اتبلغ العميل' });
+}
+// The owner asks anything in plain words: stock, cash, sales, orders, alerts, debts, or a forgotten password.
+async function answerOwner(chat: string, text: string, intent = '') {
+  const row = await db.load(); E.setState(row.state);
+  const r = ownerReply(E, text, intent);
+  if (r.intent === 'password') { await askWhosePassword(chat); return; }
+  await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: r.text.slice(0, 4000), ...(r.keyboard ? { reply_markup: r.keyboard } : {}) });
+}
+const ROLE_ORDER = ['owner', 'accountant', 'sales', 'storekeeper', 'supervisor', 'worker'];
+async function askWhosePassword(chat: string) {
+  const { data } = await admin.from('profiles').select('user_id,name,username,role,active').eq('active', true).neq('role', 'pending');
+  const users = (data || []).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role)).slice(0, 20);
+  if (!users.length) { await tg('sendMessage', { chat_id: chat, text: 'مفيش حسابات شغالة.' }); return; }
+  await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: '🔑 <b>باسورد جديد</b>\n\nمين اللي نسي الباسورد؟ هعمله باسورد مؤقت يدخل بيه، وبعدها يغيّره من السيستم.',
+    reply_markup: { inline_keyboard: users.map(u => [{ text: `${u.role === 'owner' ? '👑 ' : ''}${u.name} (${u.username})`, callback_data: `pw:${u.user_id}` }]) } });
+}
+function tempPassword() { // 10 characters, no look-alikes (0/O, 1/l/I)
+  const abc = 'abcdefghjkmnpqrstuvwxyz23456789', b = new Uint8Array(10); crypto.getRandomValues(b);
+  return Array.from(b, x => abc[x % abc.length]).join('');
+}
+// pw:<id> asks to confirm · pwy:<id> sets a temporary password · pwn: cancels
+async function passwordStep(cq: Record<string, any>, chat: string, data: string) {
+  const [act, id] = data.split(':'), mid = cq.message.message_id;
+  if (act === 'pwn') { await tg('editMessageText', { chat_id: chat, message_id: mid, text: 'اتلغى. الباسورد زي ما هو.' }); await tg('answerCallbackQuery', { callback_query_id: cq.id }); return; }
+  const { data: p } = await admin.from('profiles').select('user_id,name,username,role,active').eq('user_id', id).maybeSingle();
+  if (!p || !p.active || p.role === 'pending') { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'الحساب ده مش موجود أو موقوف', show_alert: true }); return; }
+  if (act === 'pw') {
+    await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: `🔑 هعمل باسورد مؤقت لـ <b>${esc(p.name)}</b> (<code>${esc(p.username)}</code>).\nالباسورد القديم هيبطل يشتغل. متأكد؟`,
+      reply_markup: { inline_keyboard: [[{ text: '✅ أيوه، اعمل باسورد جديد', callback_data: `pwy:${id}` }], [{ text: '↩️ لأ، سيبه', callback_data: 'pwn:' }]] } });
+    await tg('answerCallbackQuery', { callback_query_id: cq.id }); return;
+  }
+  const pass = tempPassword();
+  const { error } = await admin.auth.admin.updateUserById(id, { password: pass });
+  if (error) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'تعذر تغيير الباسورد، جرّب تاني', show_alert: true }); return; }
+  const owner = await ownerProfile();
+  await db.log({ user_id: owner?.user_id, username: owner?.username, op: 'reset_password_tg', args: { id, username: p.username }, ok: true, error: null, version: null });
+  await tg('editMessageText', { chat_id: chat, message_id: mid, parse_mode: 'HTML', text: `✅ <b>باسورد جديد لـ ${esc(p.name)}</b>\n\nاسم الدخول: <code>${esc(p.username)}</code>\nالباسورد المؤقت: <code>${pass}</code>\n\nادخل بيه، وبعدها غيّره من «المستخدمين والصلاحيات». وامسح الرسالة دي بعد ما تستخدمه.` });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'اتعمل باسورد جديد' });
+}
+
 async function telegramUpdate(u: Record<string, any>) {
   const ownerChat = await secret('owner_chat');
   if (u.message) {
@@ -84,12 +141,17 @@ async function telegramUpdate(u: Record<string, any>) {
       }
       await tg('sendMessage', { chat_id: chat, text: 'الكود ده انتهى أو غلط. اعمل كود جديد من الإعدادات في السيستم.' }); return;
     }
-    if (chat !== ownerChat) await tg('sendMessage', { chat_id: chat, text: 'البوت ده خاص بإدارة بوم ميت.' });
+    if (chat !== ownerChat) { await tg('sendMessage', { chat_id: chat, text: 'البوت ده خاص بإدارة بوم ميت.' }); return; }
+    await answerOwner(chat, text.slice(0, 300));
     return;
   }
   const cq = u.callback_query; if (!cq) return;
   const chat = String(cq.message?.chat?.id || '');
   if (!ownerChat || chat !== ownerChat) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مش مسموح' }); return; }
+  if (/^pay:(ok|no):/.test(String(cq.data || ''))) { await payDecision(cq, chat); return; }
+  const qd = String(cq.data || '');
+  if (/^q:[a-z]+$/.test(qd)) { await tg('answerCallbackQuery', { callback_query_id: cq.id }); await answerOwner(chat, '', qd.slice(2)); return; }
+  if (/^pw[yn]?:/.test(qd)) { await passwordStep(cq, chat, qd); return; }
   const parts = String(cq.data || '').split(':');
   const act = parts[0], id = parts[parts.length - 1], pickRole = parts.length === 3 ? parts[1] : '';
   const { data: p } = await admin.from('profiles').select('*').eq('user_id', id).maybeSingle();

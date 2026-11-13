@@ -2,6 +2,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
 import { runOp, runAdmin } from '../_shared/core.mjs';
+import { notifyBot } from '../_shared/notify.ts';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
@@ -81,7 +82,26 @@ Deno.serve(async (req) => {
       const r = await telegram(String(args?.chat || ''), '✅ بوم ميت: تنبيهات السيستم اتوصلت بتليجرام');
       return json(r.ok ? 200 : 400, r.ok ? { ok: true } : { error: r.error });
     }
+    if (op === 'orderProofUrl') { // a short-lived link to an InstaPay screenshot (private bucket)
+      if (!profile || !profile.active || !['owner', 'sales', 'accountant'].includes(profile.role)) return json(403, { error: 'الصلاحية دي مش متاحة لحسابك' });
+      const row = await db.load(); const id = String((Array.isArray(args) ? args[0] : args)?.id || '');
+      const o = ((row.state.docs || {}).orders || []).find((x: { id: string }) => x.id === id);
+      if (!o || !o.proof || !o.proof.path) return json(404, { error: 'مفيش صورة تحويل للطلب ده' });
+      const { data, error } = await admin.storage.from('order-proofs').createSignedUrl(o.proof.path, 600);
+      return error ? json(500, { error: 'تعذر فتح الصورة' }) : json(200, { ok: true, result: { url: data.signedUrl } });
+    }
     const r = await runOp({ E, db, profile, op, args, telegram });
+    if (r.status === 200 && op === 'decideOrder') { // tell the customer on WhatsApp
+      const a = (Array.isArray(args) ? args[0] : args) || {};
+      // approve no longer messages anyone: the order is reviewed (delivery fee + time) and then sent with «send».
+      // Cash invoices go out only once the money is collected.
+      // deno-lint-ignore no-explicit-any
+      const o: any = r.body?.result || {};
+      const kind = a.action === 'send' ? (o.receiptNo ? 'paid' : 'approved')
+        : a.action === 'paid' ? (o.status === 'pending' ? 'proofok' : (o.receiptNo && o.sentAt ? 'paid' : ''))
+        : ({ proofok: 'proofok', nopay: 'nopay', eta: o.sentAt ? 'eta' : '', resend: 'resend', reject: 'rejected' } as Record<string, string>)[a.action] || '';
+      if (kind) await notifyBot(admin, a.id, kind);
+    }
     return json(r.status, r.body);
   } catch (e) {
     return json(500, { error: (e as Error).message || 'خطأ في السيرفر' });

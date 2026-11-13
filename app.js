@@ -91,7 +91,7 @@ const NAV = [
   ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
 const ACCESS = {}; NAV.forEach(([, items]) => items.forEach(([id, t, , roles]) => { ACCESS[id] = { t, roles }; }));
-const DETAIL_PARENT = { batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
+const DETAIL_PARENT = { order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
 const QUICK = [
   ['b-new', 'تشغيلة جديدة', 'افتح تشغيلة برقم', 'batch', ['owner', 'supervisor']],
   ['go:worker', 'صرف خامات', 'من التابلت على تشغيلة', 'hand', ['owner', 'supervisor', 'worker']],
@@ -189,7 +189,7 @@ function render() {
 function page(title, html, { crumb, tools } = {}) { renderTop(title, crumb, tools); content().innerHTML = html; }
 
 /* ---------- Excel export ---------- */
-const NO_XLSX = new Set(['worker', 'invoice', 'newinvoice', 'opening', 'settings', 'flow', 'home']);
+const NO_XLSX = new Set(['worker', 'order', 'invoice', 'newinvoice', 'opening', 'settings', 'flow', 'home']);
 function addExcelButton() {
   if (NO_XLSX.has(route.page) || role() === 'worker' || !content().querySelector('table.t')) return;
   const tools = document.querySelector('#top .tools'); if (!tools || tools.querySelector('[data-act="xlsx"]')) return;
@@ -664,7 +664,10 @@ function loginScreen(msg) {
     <label class="fld"><span>اسم المستخدم</span><input class="f" id="lg-u" autocomplete="username" dir="ltr" required></label>
     <label class="fld"><span>الباسورد</span><input class="f" id="lg-p" type="password" autocomplete="current-password" dir="ltr" required></label>
     <button class="btn p lg" type="submit" style="justify-content:center">${ic('lock')} دخول</button>
-    <div class="merr" id="lg-err" style="text-align:center" role="alert">${esc(msg || '')}</div></form>`);
+    <div class="merr" id="lg-err" style="text-align:center" role="alert">${esc(msg || '')}</div>
+    <button type="button" class="btn sm" id="lg-forgot" style="align-self:center">نسيت الباسورد؟</button>
+    <div class="note info" id="lg-forgot-tip" hidden>كلّم المالك، وهو يعملك باسورد جديد من «المستخدمين والصلاحيات».<br>ولو انت المالك: ابعت «نسيت الباسورد» لبوت بوم ميت على تليجرام، وهيبعتلك باسورد مؤقت.</div></form>`);
+  document.getElementById('lg-forgot').onclick = () => { document.getElementById('lg-forgot-tip').hidden = false; };
   document.getElementById('login-form').onsubmit = async e => {
     e.preventDefault();
     const u = val('lg-u').trim().toLowerCase(), pw = val('lg-p');
@@ -755,18 +758,7 @@ function enterPage() {
     requestAnimationFrame(step);
   });
 }
-let tiltEl = null;
-const untilt = () => { if (tiltEl) { tiltEl.style.removeProperty('--rx'); tiltEl.style.removeProperty('--ry'); tiltEl.classList.remove('tilt'); tiltEl = null; } };
-document.addEventListener('pointermove', e => {
-  const el = e.target.closest && e.target.closest('.card,.kpi,.qa,.pc'); if (!el) { untilt(); return; }
-  const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-  el.style.setProperty('--mx', x + 'px'); el.style.setProperty('--my', y + 'px');
-  // small tiles lean toward the cursor (desktop mouse only; big cards stay flat so tables stay readable)
-  if (!FINE.matches || CALM.matches || !el.matches('.kpi,.qa,.pc') || e.pointerType === 'touch') return;
-  if (tiltEl !== el) { untilt(); tiltEl = el; el.classList.add('tilt'); }
-  el.style.setProperty('--ry', ((x / r.width - 0.5) * 9).toFixed(2) + 'deg'); el.style.setProperty('--rx', ((0.5 - y / r.height) * 7).toFixed(2) + 'deg');
-}, { passive: true });
-document.addEventListener('pointerleave', untilt, true); window.addEventListener('blur', untilt);
+// (cursor glare and 3D tilt removed on request: surfaces stay still)
 function hideSplash() { const el = document.getElementById('splash'); if (el && !el.classList.contains('done')) { el.classList.add('done'); setTimeout(() => el.remove(), 400); } }
 new MutationObserver((m, o) => { if (document.getElementById('content')?.childElementCount || document.querySelector('#app > .login')) { hideSplash(); o.disconnect(); } }).observe(document.getElementById('app'), { childList: true, subtree: true });
 setTimeout(hideSplash, 12000); // never stay stuck on the splash

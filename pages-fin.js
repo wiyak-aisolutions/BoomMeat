@@ -9,32 +9,162 @@ const OSTAT = { pending: ['warn', 'مستني موافقة'], approved: ['ok', '
 const opack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
 PAGES.orders = () => {
   const s = S(), all = (s.docs.orders || []).slice().reverse();
-  const tb = tabs('ord', [['pending', 'مستنية'], ['approved', 'متوافق عليها'], ['rejected', 'مرفوضة'], ['all', 'الكل']], 'pending');
+  const tb = tabs('ord', [['all', 'الكل'], ['pending', 'مستنية'], ['approved', 'متوافق عليها'], ['rejected', 'مرفوضة']], 'pending');
   const rows = all.filter(o => (tb.cur === 'all' || o.status === tb.cur) && match('oq', o.no, o.name, o.phone, o.address));
   const pend = all.filter(o => o.status === 'pending'), unpaid = all.filter(o => o.status === 'approved' && !o.receiptNo);
-  const cols = [
-    { t: 'الطلب', f: o => `<b class="mono">${esc(o.no)}</b>${o.test ? ' <span class="pill mut">تجربة</span>' : ''}<br><small>${tf(o.at)}</small>` },
-    { t: 'العميل', f: o => `<b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<br><a href="https://wa.me/${esc(o.phone.replace(/^0/, '20'))}" target="_blank" rel="noopener" class="mono">${esc(o.phone)}</a>` },
-    { t: 'العنوان', f: o => esc(o.address) + (o.note ? `<br><small>${esc(o.note)}</small>` : '') },
-    { t: 'الأصناف', f: o => o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>') },
-    { t: 'الإجمالي', n: 1, f: o => `<b>${fm(o.total)}</b><br><small>${E.ORDER_METHODS[o.method]}</small>` },
-    { t: 'الحالة', f: o => `<span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>` + (o.invoiceNo ? `<br><a href="#invoice/${esc(o.invoiceId)}">${esc(o.invoiceNo)}</a>` : '') + (o.status === 'approved' ? (o.receiptNo ? ' <span class="pill ok">اتحصّل</span>' : ' <span class="pill warn">لسه متحصلش</span>') : '') + (o.reason ? `<br><small>${esc(o.reason)}</small>` : '') },
-    { t: '', f: o => o.status === 'pending' ? (o.test ? '' : `<button class="btn p sm" data-act="ord-ok" data-arg="${o.id}">${ic('check')} وافق</button> `) + `<button class="btn sm" data-act="ord-no" data-arg="${o.id}">ارفض</button>`
-        + (o.test ? ` <button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button><br><small>طلب تجربة: ملوش موافقة</small>` : '')
-        : o.test ? `<button class="btn dan sm" data-act="ord-del" data-arg="${o.id}">امسح</button>`
-        : o.status === 'approved' && !o.receiptNo ? `<button class="btn sm" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} اتحصّل</button>` : '' },
-  ];
+  const card = o => `<a class="oc ${o.status}" href="#order/${esc(o.id)}">
+      <div class="oc-a"><b class="mono">${esc(o.no)}</b>${o.test ? '<span class="pill mut">تجربة</span>' : ''}<small>${tf(o.at)}</small></div>
+      <div class="oc-b"><b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<small class="mono">${esc(o.phone)}</small></div>
+      <div class="oc-c">${o.lines.map(l => `<span>${l.count} × ${esc(l.name)} <em>${opack(l.packSize)}</em></span>`).join('')}</div>
+      <div class="oc-d"><b>${fm(o.total)} ج</b><small>${E.ORDER_METHODS[o.method] || ''}${o.proof ? (o.proof.status === 'ok' ? ' · ✅ التحويل وصل' : o.proof.status === 'rejected' ? ' · ❌ التحويل موصلش' : ' · 📎 صورة تحويل مستنية') : ''}</small></div>
+      <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}</div>
+      <span class="oc-go" aria-hidden="true">${ic('menu')}</span></a>`;
   page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, o => o.total))} ج شامل الضريبة</span></div>
       <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => o.total))} ج</span></div></div>
-    <div class="note">الطلبات دي جاية من بوت الواتساب. <b>الموافقة</b> بتعمل فاتورة آجل على العميل وبتخصم من الفريزر. ولما الفلوس تتحصّل عند التسليم (كاش أو إنستاباي) دوس <b>اتحصّل</b>.</div>
-    ${all.some(o => o.test) ? `<div class="note info">الطلبات اللي عليها <b>تجربة</b> جاية من رقم متسجل كرقم تجربة للبوت. دي مبتتحولش لفاتورة ومبتخصمش من المخزون، فمفيهاش زرار موافقة: ارفضها أو امسحها. الطلبات الحقيقية من أي رقم تاني بيظهر جنبها زرار <b>وافق</b>.</div>` : ''}
     <div class="bar">${tb.html}${searchBox('oq', 'ابحث برقم الطلب أو الاسم أو التليفون')}</div>
-    <div class="card"><div class="bd">${table('ord', cols, rows, { empty: 'مفيش طلبات هنا' })}</div></div>`);
+    <div class="ocs">${rows.map(card).join('') || '<div class="card"><div class="bd"><div class="empty">مفيش طلبات هنا</div></div></div>'}</div>
+    <p class="crumb" style="margin-top:12px">دوس على أي طلب تشوف تفاصيله وصورة التحويل ومين وافق عليه.${all.some(o => o.test) ? ' الطلبات اللي عليها «تجربة» جاية من رقم تجربة البوت: مبتتحولش لفاتورة، فمفيهاش موافقة.' : ''}</p>`);
 };
+const OACT = { placed: 'وصل الطلب من الواتساب', delivery: 'اتحدد التوصيل', send: 'اتبعت للعميل', proof: 'العميل بعت صورة التحويل', proof_rejected: 'التحويل موصلش، واتطلب من العميل يبعته تاني', approved: 'اتوافق على الطلب واتعملت الفاتورة', rejected: 'اترفض الطلب', paid: 'اتسجل إن الفلوس اتحصّلت', invoice_sent: 'الفاتورة اتبعتت للعميل على الواتساب', confirm_sent: 'تأكيد الأوردر اتبعت للعميل', edited: 'اتعدّل الطلب', deleted: 'اتمسح' };
+const PSTAT = { pending: '<span class="pill warn">مستنية مراجعة</span>', ok: '<span class="pill ok">التحويل وصل</span>', rejected: '<span class="pill bad">التحويل موصلش</span>' };
+const whoName = by => by === 'bot' ? 'بوت الواتساب' : by === 'telegram' ? 'المالك من تليجرام' : by ? E.userName(by) : '—';
+function orderTimeline(o) {
+  let ev = (o.log || []).map(x => ({ at: x.at, by: x.by, action: x.action, note: x.note }));
+  if (!ev.length) { // older orders: rebuild what we know
+    ev.push({ at: o.at, by: 'bot', action: 'placed' });
+    if (o.proof) ev.push({ at: o.proof.at, by: 'bot', action: 'proof' });
+    if (o.status === 'approved') ev.push({ at: o.decidedAt, by: o.decidedBy, action: 'approved', note: o.invoiceNo });
+    if (o.status === 'rejected') ev.push({ at: o.decidedAt, by: o.decidedBy, action: 'rejected', note: o.reason });
+    if (o.receiptNo) ev.push({ at: o.paidAt, by: o.paidBy, action: 'paid', note: o.receiptNo });
+  }
+  return `<ol class="tl">${ev.map(x => `<li class="tl-${esc(x.action)}"><b>${esc(OACT[x.action] || x.action)}</b><small>${x.at ? tf(x.at) : ''} · ${esc(whoName(x.by))}${x.note ? ' · ' + esc(x.note) : ''}</small></li>`).join('')}</ol>`;
+}
+async function proofSrc(o) {
+  if (!o.proof) return '';
+  if (o.proof.dataUrl) return o.proof.dataUrl;
+  try { const r = await U.api('orderProofUrl', [{ id: o.id }]); const u = r && r.result ? (r.result.url || r.result) : (r && r.url); return typeof u === 'string' ? u : ''; }
+  catch (_) { return ''; }
+}
+/* ---------- order review: delivery fee + time, live receipt preview, send ---------- */
+const ODRAFT = {};
+const ETA_CHIPS = ['خلال ساعة', 'خلال ساعتين', 'النهارده بالليل', 'بكرة الصبح'];
+const dlv = o => o.delivery || {};
+const draftOf = o => ODRAFT[o.id] || (ODRAFT[o.id] = { fee: dlv(o).fee != null ? String(dlv(o).fee / 100) : '', eta: (dlv(o).eta && dlv(o).eta.text) || '', at: (dlv(o).eta && dlv(o).eta.at) || '', note: dlv(o).note || '' });
+const egp2 = p => (p / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// The receipt the customer gets, rendered from the order (+ the draft while reviewing)
+function receiptHTML(o, d) {
+  const co = S().settings.company || {}, rate = S().settings.vatRate || 14;
+  const fee = d ? Math.round((parseFloat(d.fee) || 0) * 100) : (dlv(o).fee || 0);
+  const total = o.total + fee, net = Math.round(total * 100 / (100 + rate)), vat = total - net;
+  const transferOk = o.proof && o.proof.status === 'ok';
+  const paid = o.receiptNo ? total : o.paidAmount ? o.paidAmount : transferOk ? o.total : 0, due = total - paid;
+  const eta = d ? (d.eta || '') : (dlv(o).eta && dlv(o).eta.text) || '', note = d ? d.note : dlv(o).note;
+  const when = new Date((o.at || '').replace(' ', 'T'));
+  const dt = isNaN(when) ? '' : when.toLocaleString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `<div class="rcp" dir="rtl">
+    <div class="rcp-h"><div class="lg"><img src="boom-logo.png" alt=""></div><div><b>${esc(co.name || 'بوم ميت للحوم')}</b><small>فاتورة ضريبية مبسطة</small></div>${paid && !due ? '<div class="stamp">✓ مدفوع</div>' : ''}</div>
+    <div class="rcp-b">
+      <div class="r"><span>رقم الفاتورة</span><span class="mono">${esc(o.invoiceNo || 'بعد الموافقة')}</span></div>
+      <div class="r"><span>الطلب</span><span class="mono">${esc(o.no)}</span></div>
+      ${dt ? `<div class="r"><span>التاريخ</span><b>${esc(dt)}</b></div>` : ''}
+      <div class="r"><span>العميل</span><b>${esc(o.name)}</b></div>
+      <hr>
+      ${o.lines.map(l => `<div class="it"><span>${esc(l.name)}<small>${l.count} × ${opack(l.packSize)} · ${fm0(l.pricePerKg)} ج للكيلو</small></span><b>${egp2(l.amount)}</b></div>`).join('')}
+      ${fee ? `<div class="it"><span>التوصيل</span><b>${egp2(fee)}</b></div>` : ''}
+      <hr>
+      <div class="r"><span>الصافي</span><b>${egp2(net)}</b></div>
+      <div class="r"><span>ضريبة القيمة المضافة ${rate}٪</span><b>${egp2(vat)}</b></div>
+      <div class="r"><span>الدفع</span><b>${esc(E.ORDER_METHODS[o.method] || '')}</b></div>
+      <div class="grand"><span>الإجمالي</span><b>${egp2(total)} ج</b></div>
+      ${paid && due ? `<div class="r due"><span>مدفوع ${egp2(paid)} ج</span><b>باقي ${egp2(due)} ج عند الاستلام</b></div>` : ''}
+      ${eta ? `<div class="eta">🚚 ميعاد التوصيل: <b>${esc(eta)}</b></div>` : ''}
+      ${note ? `<div class="eta note">${esc(note)}</div>` : ''}
+    </div>
+    <div class="rcp-f"><b>شكراً إنك اخترت بوم ميت</b><br>${esc(co.address || '')} · ${esc((co.phone || '').replace(/[()+\s]/g, '').replace(/^2/, ''))}<br>رقم التسجيل الضريبي ${esc(co.taxId || '')}</div>
+  </div>`;
+}
+function reviewPanel(o) {
+  const d = draftOf(o), approved = o.status === 'approved', sent = !!o.sentAt;
+  const cash = o.method !== 'instapay', fullyPaid = !!o.receiptNo;
+  const head = !approved ? 'راجع الطلب قبل الموافقة' : sent ? 'اتبعت للعميل' : 'جاهز يتبعت للعميل';
+  const sub = !approved ? 'حدد التوصيل وشوف الفاتورة زي ما العميل هيستلمها' : cash && !fullyPaid ? 'الكاش: العميل بيستلم التأكيد وميعاد التوصيل دلوقتي، والفاتورة بتتبعتله بعد التحصيل' : 'العميل هيستلم التأكيد وميعاد التوصيل والفاتورة';
+  const form = `<div class="rv-form">
+      ${!approved ? `<label class="fld"><span>التوصيل (ج)</span><input class="f" id="rv-fee" type="number" inputmode="decimal" min="0" step="1" placeholder="0" value="${esc(d.fee)}"></label>` : `<div class="kv"><div><span>التوصيل</span><b>${dlv(o).fee ? fm(dlv(o).fee) + ' ج' : 'مجاني'}</b></div></div>`}
+      <label class="fld"><span>ميعاد التوصيل</span><input class="f" id="rv-eta" maxlength="80" placeholder="مثلاً: خلال ساعتين" value="${esc(d.eta)}"></label>
+      <div class="chips rv-chips">${ETA_CHIPS.map(t => `<button type="button" class="chip ${d.eta === t ? 'on' : ''}" data-act="rv-eta" data-arg="${esc(t)}">${t}</button>`).join('')}</div>
+      <label class="fld"><span>ملاحظة للعميل (اختياري)</span><input class="f" id="rv-note" maxlength="160" placeholder="مثلاً: المندوب هيكلمك قبلها بنص ساعة" value="${esc(d.note)}"></label>
+      <div class="rv-acts">${!approved
+        ? (o.test ? '<div class="note">ده طلب تجربة: مينفعش يتوافق عليه.</div>' : `<button class="btn p lg" data-act="rv-approve" data-arg="${o.id}">${ic('check')} وافق واعمل الفاتورة</button>`)
+        : `<button class="btn p lg" data-act="rv-send" data-arg="${o.id}">${ic('send')} ${sent ? 'ابعت للعميل تاني' : 'ابعت للعميل'}</button>${dlv(o).setAt ? `<button class="btn" data-act="rv-eta-save" data-arg="${o.id}">غيّر ميعاد التوصيل بس</button>` : ''}`}</div>
+      ${approved && cash && !fullyPaid ? '<div class="note info">الفاتورة لسه متبعتتش. بتتبعت للعميل لوحدها أول ما تدوس «الفلوس اتحصّلت».</div>' : ''}
+    </div>`;
+  return `<div class="card rv"><div class="hd"><h3>${head}</h3><span class="sub">${sub}</span></div><div class="bd rv-grid">${form}<div class="rv-prev"><small class="crumb">اللي العميل هيستلمه على الواتساب</small><div id="rv-receipt">${receiptHTML(o, d)}</div></div></div></div>`;
+}
+PAGES.order = id => {
+  const o = ordOf(id); if (!o) { U.go('orders'); return; }
+  const c = o.customerId ? S().partners.find(p => p.id === o.customerId) : null;
+  const canAct = ['owner', 'sales', 'accountant'].includes(U.role());
+  const proofWaiting = o.proof && o.proof.status === 'pending' && !o.receiptNo;
+  const acts = !canAct ? '' : (proofWaiting ? `<button class="btn p" data-act="ord-proof-ok" data-arg="${o.id}">${ic('check')} التحويل وصل</button><button class="btn" data-act="ord-nopay" data-arg="${o.id}">التحويل موصلش</button>` : '')
+    + (o.status === 'approved' && !o.receiptNo ? `<button class="btn ${proofWaiting ? '' : 'p'}" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} الفلوس اتحصّلت</button>` : '')
+    + (o.status === 'pending' ? `<button class="btn" data-act="ord-no" data-arg="${o.id}">ارفض الطلب</button>` : '')
+    + (o.test ? `<button class="btn dan" data-act="ord-del" data-arg="${o.id}">امسح طلب التجربة</button>` : '');
+  const wa = U.waLink(o.phone);
+  page(`طلب ${esc(o.no)}`, `<div class="bar"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : ''}${o.test ? '<span class="pill mut">تجربة</span>' : ''}<span class="grow"></span>${acts}</div>
+    ${canAct && o.status !== 'rejected' ? reviewPanel(o) : ''}
+    <div class="grid g-main">
+      <div class="card"><div class="hd"><h3>الطلب</h3><span class="sub">${tf(o.at)}</span></div><div class="bd">
+        <div class="tw"><table class="t"><thead><tr><th>المنتج</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">القيمة</th></tr></thead><tbody>
+          ${o.lines.map(l => `<tr><td class="nm"><b>${esc(l.name)}</b></td><td>${opack(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n"><b>${fm(l.amount)}</b></td></tr>`).join('')}
+          ${dlv(o).fee ? `<tr><td class="nm">التوصيل</td><td></td><td></td><td></td><td></td><td class="n">${fm(dlv(o).fee)}</td></tr>` : ''}
+          <tr class="tot"><td colspan="5">الإجمالي شامل الضريبة</td><td class="n">${fm(o.total + (dlv(o).fee || 0))}</td></tr></tbody></table></div>
+        ${o.note ? `<div class="note" style="margin-top:12px"><b>ملاحظة العميل:</b> ${esc(o.note)}</div>` : ''}
+        ${o.reason ? `<div class="note bad" style="margin-top:12px"><b>سبب الرفض:</b> ${esc(o.reason)}</div>` : ''}
+      </div></div>
+      <div style="display:grid;gap:16px;align-content:start">
+        <div class="card"><div class="hd"><h3>العميل</h3></div><div class="bd">
+          <div class="kv"><div><span>الاسم</span><b>${c ? `<a href="#customer/${esc(c.id)}">${esc(o.name)}</a>` : esc(o.name)}</b></div><div><span>التليفون</span><b class="mono">${esc(o.phone)}</b></div><div><span>النوع</span><b>${o.kind === 'wholesale' ? 'جملة' : 'قطاعي'}</b></div><div><span>الدفع</span><b>${E.ORDER_METHODS[o.method] || '—'}</b></div></div>
+          <p style="margin:12px 0 10px"><b>العنوان:</b> ${esc(o.address)}</p>
+          <div class="bar" style="margin:0">${wa}${o.location && o.location.lat ? `<a class="btn" href="https://maps.google.com/?q=${encodeURIComponent(o.location.lat + ',' + o.location.lng)}" target="_blank" rel="noopener">${ic('send')} افتح اللوكيشن</a>` : ''}${o.invoiceId ? `<a class="btn" href="#invoice/${esc(o.invoiceId)}">${ic('bill')} الفاتورة ${esc(o.invoiceNo)}</a>` : ''}</div>
+        </div></div>
+        <div class="card"><div class="hd"><h3>صورة التحويل</h3>${o.proof ? `<span class="sub">${tf(o.proof.at)}</span><div class="tools">${PSTAT[o.proof.status || 'pending']}</div>` : ''}</div><div class="bd" id="proof-box">${o.proof ? '<div class="empty">بتحمّل الصورة…</div>' : `<div class="empty">${o.method === 'instapay' ? 'العميل لسه مبعتش صورة التحويل.' : 'الدفع كاش عند الاستلام، مفيش تحويل.'}</div>`}</div></div>
+        <div class="card"><div class="hd"><h3>اللي حصل في الطلب</h3><span class="sub">مين عمل إيه وإمتى</span></div><div class="bd">${orderTimeline(o)}</div></div>
+      </div>
+    </div>`, { crumb: '<a href="#orders">طلبات واتساب</a> / ' + esc(o.no) });
+  // live preview while typing (no full re-render, so focus stays in the field)
+  const d = draftOf(o), redraw = () => { const box = document.getElementById('rv-receipt'); if (box) box.innerHTML = receiptHTML(o, d); };
+  [['rv-fee', 'fee'], ['rv-eta', 'eta'], ['rv-note', 'note']].forEach(([elId, k]) => { const el = document.getElementById(elId); if (el) el.oninput = () => { d[k] = el.value; redraw(); document.querySelectorAll('.rv-chips .chip').forEach(ch => ch.classList.toggle('on', ch.dataset.arg === d.eta)); }; });
+  if (o.proof) proofSrc(o).then(src => { const box = document.getElementById('proof-box'); if (!box) return; box.innerHTML = src ? `<a href="${esc(src)}" target="_blank" rel="noopener" class="proof"><img src="${esc(src)}" alt="صورة التحويل"></a><small class="crumb">دوس على الصورة تفتحها كبيرة.</small>` : '<div class="note bad">الصورة مش متاحة دلوقتي. جرّب تحدّث الصفحة.</div>'; });
+};
+const etaOf = d => d.eta ? { text: d.eta.trim(), ...(d.at ? { at: d.at } : {}) } : null;
+ACTS['rv-eta'] = t => { const o = ordOf(U.route ? U.route().id : location.hash.split('/')[1]); const id = location.hash.split('/')[1]; const d = ODRAFT[id]; if (!d) return; d.eta = t; const el = document.getElementById('rv-eta'); if (el) el.value = t; document.querySelectorAll('.rv-chips .chip').forEach(ch => ch.classList.toggle('on', ch.dataset.arg === t)); const box = document.getElementById('rv-receipt'); if (box) box.innerHTML = receiptHTML(ordOf(id), d); };
+ACTS['rv-approve'] = async id => {
+  const o = ordOf(id), d = draftOf(o), fee = Math.round((parseFloat(d.fee) || 0) * 100);
+  if (fee < 0 || fee > 100000) return toast('رسوم التوصيل مش منطقية', 'bad');
+  if (!d.eta.trim()) { const el = document.getElementById('rv-eta'); if (el) { el.focus(); U.pinError && U.pinError(el, 'اكتب ميعاد التوصيل أو اختار واحد'); } return; }
+  const r = await run(() => E.decideOrder({ id, action: 'approve', deliveryFee: fee, eta: etaOf(d), note: d.note.trim() }), 'اتوافق على الطلب. راجع وابعت للعميل');
+  if (r) delete ODRAFT[id];
+};
+ACTS['rv-send'] = async id => { const o = ordOf(id), d = draftOf(o);
+  if (d.eta.trim() && (!dlv(o).eta || dlv(o).eta.text !== d.eta.trim() || (dlv(o).note || '') !== d.note.trim())) { const ok = await run(() => E.decideOrder({ id, action: 'eta', eta: etaOf(d), note: d.note.trim() })); if (!ok) return; }
+  const r = await run(() => E.decideOrder({ id, action: 'send' }), o.method !== 'instapay' && !o.receiptNo ? 'اتبعت التأكيد وميعاد التوصيل. الفاتورة بتتبعت بعد التحصيل' : 'اتبعتت الفاتورة وميعاد التوصيل للعميل');
+  if (r) delete ODRAFT[id];
+};
+ACTS['rv-eta-save'] = async id => { const o = ordOf(id), d = draftOf(o); if (!d.eta.trim()) return toast('اكتب ميعاد التوصيل', 'bad');
+  const r = await run(() => E.decideOrder({ id, action: 'eta', eta: etaOf(d), note: d.note.trim() }), 'اتغير الميعاد' + (o.sentAt ? ' والعميل هيجيله رسالة' : ''));
+  if (r) delete ODRAFT[id]; };
+ACTS['ord-proof-ok'] = id => modal('التحويل وصل؟', `<p>اتأكدت إن التحويل وصل حسابك؟ العميل هيجيله «التحويل وصل ✅، هنراجع طلبك ونبعتلك الفاتورة وميعاد التوصيل».</p>`, { saveText: 'أيوه، وصل', save: async () => { await E.decideOrder({ id, action: 'proofok' }); U.afterChange(); toast('اتسجل إن التحويل وصل', 'ok'); } });
+
+
 const ordOf = id => (S().docs.orders || []).find(o => o.id === id);
 ACTS['ord-ok'] = id => { const o = ordOf(id); modal(`موافقة على ${esc(o.no)}`, `<p>هتتعمل فاتورة <b>آجل</b> بـ <b>${fm(o.total)}</b> (شامل الضريبة) على <b>${esc(o.name)}</b>، وهيتخصم من الفريزر:</p><p>${o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>')}</p><p>الدفع عند التسليم: ${E.ORDER_METHODS[o.method]}.</p>`, { saveText: 'وافق واعمل الفاتورة', save: async () => { await E.decideOrder({ id, action: 'approve' }); U.afterChange(); toast('اتوافق على الطلب واتعملت الفاتورة', 'ok'); } }); };
-ACTS['ord-no'] = id => { const o = ordOf(id); modal(`رفض ${esc(o.no)}`, `<label class="fld"><span>السبب (اختياري، بيظهر هنا بس)</span><input class="f" id="ord-reason" maxlength="200" placeholder="مثلاً: العنوان برا منطقة التوصيل"></label>`, { saveText: 'ارفض الطلب', save: async () => { await E.decideOrder({ id, action: 'reject', reason: val('ord-reason') }); U.afterChange(); toast('اترفض الطلب', 'ok'); } }); };
-ACTS['ord-paid'] = id => { const o = ordOf(id); modal(`تحصيل ${esc(o.no)}`, `<p>هيتسجل تحصيل <b>${fm(o.total)}</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]}).</p>`, { saveText: 'سجّل التحصيل', save: async () => { await E.decideOrder({ id, action: 'paid' }); U.afterChange(); toast('اتسجل التحصيل', 'ok'); } }); };
+ACTS['ord-no'] = id => { const o = ordOf(id); modal(`رفض ${esc(o.no)}`, `<p class="crumb">البوت هيبلغ العميل على الواتساب بلطف إن الطلب مش هيكمل.</p><label class="fld"><span>السبب (اختياري)</span><input class="f" id="ord-reason" maxlength="200" placeholder="مثلاً: العنوان برا منطقة التوصيل"></label>`, { saveText: 'ارفض الطلب', save: async () => { await E.decideOrder({ id, action: 'reject', reason: val('ord-reason') }); U.afterChange(); toast('اترفض الطلب', 'ok'); } }); };
+ACTS['ord-paid'] = id => { const o = ordOf(id); const insta = o.method === 'instapay';
+  modal(insta ? `التحويل وصل · ${esc(o.no)}` : `تحصيل ${esc(o.no)}`, `<p>${insta ? 'اتأكدت إن التحويل وصل حسابك؟' : 'الفلوس اتحصّلت من العميل؟'} هيتسجل تحصيل <b>${fm(o.total)} ج</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]})${o.status === 'pending' ? '، والطلب هيتوافق عليه وتتعمل فاتورته' : ''}.</p><p class="crumb">العميل هيجيله على الواتساب «تم دفع الأوردر» وفاتورته.</p>`,
+  { saveText: insta ? 'أيوه، التحويل وصل' : 'سجّل التحصيل', save: async () => { await E.decideOrder({ id, action: 'paid' }); U.afterChange(); toast('اتسجل الدفع والعميل هيجيله التأكيد', 'ok'); } }); };
+ACTS['ord-nopay'] = id => { const o = ordOf(id); modal(`التحويل موصلش · ${esc(o.no)}`, `<p>البوت هيقول لـ <b>${esc(o.name)}</b> إن التحويل موصلش، ويطلب منه يبعت صورة التحويل تاني.</p><label class="fld"><span>السبب (اختياري)</span><input class="f" id="np-reason" maxlength="200" placeholder="مثلاً: المبلغ مش مطابق"></label>`,
+  { saveText: 'ابعت للعميل', save: async () => { await E.decideOrder({ id, action: 'nopay', reason: val('np-reason') }); U.afterChange(); toast('اتبعت للعميل يبعت التحويل تاني', 'ok'); } }); };
+ACTS['ord-resend'] = id => run(() => E.decideOrder({ id, action: 'resend' }), 'الفاتورة هتتبعت للعميل تاني');
 ACTS['ord-del'] = id => run(() => E.decideOrder({ id, action: 'delete' }), 'اتمسح طلب التجربة');
 
 /* ========== INVOICES ========== */
@@ -369,7 +499,7 @@ PAGES.users = () => {
   const ACC = { home: U.ALL, batches: ['owner', 'supervisor', 'accountant'], worker: ['owner', 'supervisor', 'worker'], cutting: ['owner', 'supervisor', 'storekeeper', 'accountant'], stock: ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['owner', 'storekeeper', 'accountant'], invoices: ['owner', 'sales', 'accountant'], customers: ['owner', 'sales', 'accountant'], items: ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['owner', 'accountant'], reports: ['owner', 'accountant'], opening: ['owner', 'accountant'], audit: ['owner', 'accountant'], settings: ['owner'] };
   const pages = [['home', 'نظرة عامة'], ['batches', 'التشغيلات'], ['worker', 'شاشة العامل'], ['cutting', 'التقطيع'], ['stock', 'المخزون'], ['purchases', 'المشتريات'], ['invoices', 'الفواتير'], ['customers', 'العملاء'], ['items', 'الأصناف'], ['treasury', 'الخزنة'], ['reports', 'القوائم المالية'], ['opening', 'أرصدة البداية'], ['audit', 'سجل الحركات'], ['settings', 'الإعدادات']];
   const cols = [{ t: 'الاسم', f: u => `<span style="display:inline-flex;gap:10px;align-items:center">${U.avatar(u, 'av-sm')}<b>${esc(u.name)}</b></span>` }, { t: 'اسم الدخول', f: u => `<span class="mono">${esc(u.username || '—')}</span>` }, { t: 'الدور', f: u => E.ROLES[u.role].name }, { t: 'الحالة', f: u => u.active === false ? '<span class="pill bad">موقوف</span>' : '<span class="pill ok">شغال</span>' }];
-  cols.push({ t: '', f: u => live ? (u.id === s.currentUser ? '<span class="pill red">حسابك</span>' : `<button class="btn sm" data-act="usr-edit" data-arg="${u.id}">تعديل</button> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">باسورد جديد</button>`) : (u.id === s.currentUser ? '<span class="pill red">الحساب الحالي</span>' : `<button class="btn sm" data-act="as-user" data-arg="${u.id}">جرّب كـ ${esc(u.name)}</button>`) });
+  cols.push({ t: '', f: u => live ? (u.id === s.currentUser ? `<span class="pill red">حسابك</span> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">غيّر الباسورد</button>` : `<button class="btn sm" data-act="usr-edit" data-arg="${u.id}">تعديل</button> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">باسورد جديد</button>`) : (u.id === s.currentUser ? '<span class="pill red">الحساب الحالي</span>' : `<button class="btn sm" data-act="as-user" data-arg="${u.id}">جرّب كـ ${esc(u.name)}</button>`) });
   if (live) setTimeout(loadRequests);
   page('المستخدمين والصلاحيات', `${live ? '<div id="req-box"></div>' : ''}<div class="card"><div class="hd"><h3>المستخدمين</h3><span class="sub">${live ? 'كل واحد يدخل باسم المستخدم والباسورد بتوعه' : 'في نسخة التدريب جرّب أي حساب من "جرّب كـ" فوق'}</span>${live ? `<div class="tools"><button class="btn p" data-act="usr-new">${ic('plus')} مستخدم جديد</button></div>` : ''}</div><div class="bd">${table('us', cols, s.users)}</div></div>
     <div class="card"><div class="hd"><h3>مين يشوف إيه</h3></div><div class="bd"><div class="tw"><table class="t"><thead><tr><th>الشاشة</th>${Object.values(E.ROLES).map(r => `<th>${r.name}</th>`).join('')}</tr></thead><tbody>${pages.map(([k, n]) => `<tr><td>${n}</td>${Object.keys(E.ROLES).map(r => `<td>${ACC[k].includes(r) ? '<span class="pill ok">✓</span>' : '<span style="color:var(--muted)">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
