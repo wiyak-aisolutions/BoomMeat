@@ -5,7 +5,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
 import { syncUser, runOp } from '../_shared/core.mjs';
 import { notifyBot } from '../_shared/notify.ts';
-import { ownerReply } from '../_shared/ownerbot.mjs';
+import { ownerReply, MENU } from '../_shared/ownerbot.mjs';
+import { getViewers, setViewers, copyText, MAX_VIEWERS, VIEWER_NOTE } from '../_shared/viewers.ts';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
@@ -63,6 +64,7 @@ async function requestAccount(b: Record<string, string>) {
     if ((await db.save(row.state, row.version)) != null) break;
   }
   if (chat) await sendRequest(chat, { user_id: data.user.id, name, username, phone });
+  await copyText(admin, `🆕 طلب حساب جديد · بوم ميت\nالاسم: ${name}\nاسم الدخول: ${username}\nالتليفون: ${phone}\n\n${VIEWER_NOTE}`);
   return json(200, { ok: true });
 }
 
@@ -74,7 +76,7 @@ async function payDecision(cq: any, chat: string) {
   const [, ans, id] = String(cq.data).split(':');
   const owner = await ownerProfile();
   if (!owner) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مفيش حساب مالك' }); return; }
-  const r = await runOp({ E, db, profile: owner, op: 'decideOrder', args: [{ id, action: ans === 'ok' ? 'paid' : 'nopay', reason: ans === 'ok' ? '' : 'المالك: التحويل موصلش' }], telegram: async (c: string, text: string) => { const j = await tg('sendMessage', { chat_id: c, text }); return j && j.ok ? { ok: true } : { ok: false, error: 'فشل الإرسال' }; } });
+  const r = await runOp({ E, db, profile: owner, op: 'decideOrder', args: [{ id, action: ans === 'ok' ? 'paid' : 'nopay', reason: ans === 'ok' ? '' : 'المالك: التحويل موصلش' }], telegram: async (c: string, text: string) => { const j = await tg('sendMessage', { chat_id: c, text }); return j && j.ok ? { ok: true } : { ok: false, error: 'فشل الإرسال' }; }, copy: (t: string) => copyText(admin, t) });
   const no = (r.body?.result?.no) || id;
   if (r.status !== 200) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: String(r.body?.error || 'تعذر').slice(0, 190), show_alert: true }); return; }
   const res = r.body?.result || {};
@@ -87,7 +89,8 @@ async function payDecision(cq: any, chat: string) {
 // The owner asks anything in plain words: stock, cash, sales, orders, alerts, debts, or a forgotten password.
 async function answerOwner(chat: string, text: string, intent = '') {
   const row = await db.load(); E.setState(row.state);
-  const r = ownerReply(E, text, intent);
+  // deno-lint-ignore no-explicit-any
+  const r: any = ownerReply(E, text, intent);
   if (r.intent === 'password') { await askWhosePassword(chat); return; }
   await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: r.text.slice(0, 4000), ...(r.keyboard ? { reply_markup: r.keyboard } : {}) });
 }
@@ -123,15 +126,46 @@ async function passwordStep(cq: Record<string, any>, chat: string, data: string)
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'اتعمل باسورد جديد' });
 }
 
+// A viewer asks like the owner, but never gets the password flow or any approval buttons.
+const VIEWER_MENU = { inline_keyboard: MENU.inline_keyboard.filter((row: { callback_data: string }[]) => !row.some(b => b.callback_data === 'q:password')) };
+async function answerViewer(chat: string, text: string, intent = '') {
+  const row = await db.load(); E.setState(row.state);
+  // deno-lint-ignore no-explicit-any
+  const r: any = ownerReply(E, text, intent);
+  if (r.intent === 'password') { await tg('sendMessage', { chat_id: chat, text: 'الباسورد المالك بس اللي يقدر يغيّره. كلّمه، وهو يعملك باسورد جديد.' }); return; }
+  await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: r.text.slice(0, 4000), ...(r.keyboard ? { reply_markup: VIEWER_MENU } : {}) });
+}
+function nameOf(from: Record<string, any> | undefined) {
+  const n = [from?.first_name, from?.last_name].filter(Boolean).join(' ').trim() || (from?.username ? '@' + from.username : '');
+  return n.slice(0, 60) || 'متابع';
+}
+// /start v<code>: the one-time link the owner made in Settings → «ضيف متابع»
+async function joinViewer(chat: string, code: string, from: Record<string, any> | undefined, ownerChat: string) {
+  const want = await secret('tg_view_code'), exp = Number(await secret('tg_view_exp') || 0);
+  if (!want || code !== want || Date.now() > exp) { await tg('sendMessage', { chat_id: chat, text: 'اللينك ده انتهى أو اتستخدم قبل كده. اطلب من المالك لينك جديد.' }); return; }
+  if (chat === ownerChat) { await tg('sendMessage', { chat_id: chat, text: 'ده تليجرام المالك نفسه، مش محتاج تبقى متابع.' }); return; }
+  const list = await getViewers(admin);
+  await setSecret('tg_view_code', '');
+  if (list.some(v => v.chat === chat)) { await tg('sendMessage', { chat_id: chat, text: 'انت متابع بالفعل ✅' }); return; }
+  if (list.length >= MAX_VIEWERS) { await tg('sendMessage', { chat_id: chat, text: 'عدد المتابعين كمل. كلّم المالك.' }); return; }
+  const name = nameOf(from);
+  await setViewers(admin, [...list, { chat, name, at: new Date().toISOString() }]);
+  await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: `👋 أهلًا ${esc(name)}، انت دلوقتي <b>متابع</b> لبوم ميت.\n\nهيوصلك هنا نفس تنبيهات المالك: المخزون، والصلاحية، والتصحيحات، والأوردرات، وصور التحويلات. وتقدر تسألني: «مخزون ريش»، «الخزنة فيها كام»، «مبيعات النهارده».\n\nالموافقات كلها مع المالك بس.`, reply_markup: VIEWER_MENU });
+  if (ownerChat) await tg('sendMessage', { chat_id: ownerChat, parse_mode: 'HTML', text: `👀 <b>${esc(name)}</b> بقى متابع على تليجرام.\nبيشوف التنبيهات ويسأل البوت، ومبيوافقش على حاجة.`, reply_markup: { inline_keyboard: [[{ text: '🗑 شيله', callback_data: `vrm:${chat}` }]] } });
+}
+
 async function telegramUpdate(u: Record<string, any>) {
   const ownerChat = await secret('owner_chat');
   if (u.message) {
     const chat = String(u.message.chat.id), text = String(u.message.text || '');
+    const vm = text.match(/^\/start\s+v([a-z0-9]{10})$/);
+    if (vm) { await joinViewer(chat, vm[1], u.message.from, ownerChat); return; }
     const m = text.match(/^\/start\s+([a-z0-9]{10})$/);
     if (m) {
       const code = await secret('tg_link_code'), exp = Number(await secret('tg_link_exp') || 0);
       if (code && m[1] === code && Date.now() < exp) {
         await setSecret('owner_chat', chat); await setSecret('tg_link_code', ''); 
+        const vs = await getViewers(admin); if (vs.some(v => v.chat === chat)) await setViewers(admin, vs.filter(v => v.chat !== chat)); // the owner is never also a viewer
         for (let i = 0; i < 4; i++) { const row = await db.load(); row.state.settings.tgChat = chat; row.state.settings.telegram = true; if ((await db.save(row.state, row.version)) != null) break; }
         await tg('sendMessage', { chat_id: chat, text: '✅ اتربط تليجرام بسيستم بوم ميت. هتوصلك هنا التنبيهات وطلبات الحسابات الجديدة.' });
         // send every request that is still waiting, so nothing made before linking is missed
@@ -141,13 +175,26 @@ async function telegramUpdate(u: Record<string, any>) {
       }
       await tg('sendMessage', { chat_id: chat, text: 'الكود ده انتهى أو غلط. اعمل كود جديد من الإعدادات في السيستم.' }); return;
     }
-    if (chat !== ownerChat) { await tg('sendMessage', { chat_id: chat, text: 'البوت ده خاص بإدارة بوم ميت.' }); return; }
+    if (chat !== ownerChat) {
+      if ((await getViewers(admin)).some(v => v.chat === chat)) { await answerViewer(chat, text.slice(0, 300)); return; }
+      await tg('sendMessage', { chat_id: chat, text: 'البوت ده خاص بإدارة بوم ميت.' }); return;
+    }
     await answerOwner(chat, text.slice(0, 300));
     return;
   }
   const cq = u.callback_query; if (!cq) return;
   const chat = String(cq.message?.chat?.id || '');
-  if (!ownerChat || chat !== ownerChat) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مش مسموح' }); return; }
+  if (!ownerChat || chat !== ownerChat) {
+    const qv = String(cq.data || '');
+    if (/^q:[a-z]+$/.test(qv) && qv !== 'q:password' && (await getViewers(admin)).some(v => v.chat === chat)) { await tg('answerCallbackQuery', { callback_query_id: cq.id }); await answerViewer(chat, '', qv.slice(2)); return; }
+    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'الموافقات مع المالك بس', show_alert: true }); return;
+  }
+  if (/^vrm:-?\d+$/.test(String(cq.data || ''))) { // owner removes a viewer
+    const vc = String(cq.data).slice(4), list = await getViewers(admin), v = list.find(x => x.chat === vc);
+    if (v) { await setViewers(admin, list.filter(x => x.chat !== vc)); await tg('sendMessage', { chat_id: vc, text: 'المالك شالك من متابعين بوم ميت. مش هيوصلك تنبيهات تاني.' }); }
+    await tg('editMessageText', { chat_id: chat, message_id: cq.message.message_id, parse_mode: 'HTML', text: v ? `🗑 اتشال <b>${esc(v.name)}</b> من المتابعين.` : 'اتشال قبل كده.' });
+    await tg('answerCallbackQuery', { callback_query_id: cq.id }); return;
+  }
   if (/^pay:(ok|no):/.test(String(cq.data || ''))) { await payDecision(cq, chat); return; }
   const qd = String(cq.data || '');
   if (/^q:[a-z]+$/.test(qd)) { await tg('answerCallbackQuery', { callback_query_id: cq.id }); await answerOwner(chat, '', qd.slice(2)); return; }

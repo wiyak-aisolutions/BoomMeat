@@ -36,7 +36,7 @@ check('wholesale customer by phone', r.body.result.kind === 'wholesale' && r.bod
 
 const order = (o = {}) => ({ phone: '201000000001', name: 'أحمد', address: 'الحي الرابع، مدينة ١٥ مايو', method: 'cash', lines: [{ productId: 'it_FG-401', packSize: 1000, count: 2 }], ...o });
 r = await runShop({ E, db, action: 'order', body: { order: order({ expectTotal: 970 }) }, telegram });
-check('place order', r.status === 200 && r.body.result.no === 'ORD-0001' && r.body.result.total === 970, JSON.stringify(r.body));
+check('place order', r.status === 200 && r.body.result.no === 'ORD-0001' && r.body.result.total === 1070 && r.body.result.itemsTotal === 970 && r.body.result.deliveryFee === 100, JSON.stringify(r.body));
 check('owner telegram sent', tg.length === 1 && tg[0].includes('ORD-0001') && tg[0].includes('970'), tg.join('|'));
 check('no stock or ledger effect', store.state.journal.length === 1 && E.available('it_FG-401', ['W4'], 1000) === 10000);
 r = await runShop({ E, db, action: 'catalog', body: {} });
@@ -52,7 +52,7 @@ check('bad pack refused', r.status === 400);
 r = await runShop({ E, db, action: 'order', body: { order: order({ test: true, method: 'instapay', lines: [{ productId: 'it_FG-401', packSize: 500, count: 1 }] }) }, telegram });
 check('test order numbered apart, no telegram', r.status === 200 && r.body.result.no === 'TST-0001' && tg.length === 1, JSON.stringify(r.body) + tg.length);
 const wo = await runShop({ E, db, action: 'order', body: { order: order({ phone: '01011112222', name: 'مطعم الجملة', lines: [{ productId: 'it_FG-401', packSize: 1000, count: 1 }] }) }, telegram });
-check('wholesale order priced wholesale', wo.body.result.kind === 'wholesale' && wo.body.result.total === 435, JSON.stringify(wo.body));
+check('wholesale order priced wholesale', wo.body.result.kind === 'wholesale' && wo.body.result.total === 535 && wo.body.result.itemsTotal === 435, JSON.stringify(wo.body));
 r = await runShop({ E, db, action: 'status', body: { phone: '01000000001' } });
 check('status by phone', r.body.result.length === 2 && r.body.result[0].status === 'pending', JSON.stringify(r.body));
 check('bad action', (await runShop({ E, db, action: 'nope', body: {} })).status === 400);
@@ -65,7 +65,7 @@ check('test order cannot be approved', r.status === 400);
 r = await runOp({ E, db, profile: sales, op: 'decideOrder', args: [{ id: O('ORD-0001').id, action: 'approve' }] });
 check('sales approves → invoice', r.status === 200 && O('ORD-0001').status === 'approved' && O('ORD-0001').invoiceNo, r.body.error);
 const inv = store.state.docs.invoices[0];
-check('invoice VAT included, on account', inv.total === 97000 && inv.net + inv.vat === 97000 && inv.vat === 11912 && inv.method === 'credit' && !inv.paidJe, JSON.stringify({ t: inv.total, n: inv.net, v: inv.vat }));
+check('invoice VAT included, on account', inv.total === 107000 && inv.net + inv.vat === 107000 && inv.method === 'credit' && !inv.paidJe, JSON.stringify({ t: inv.total, n: inv.net, v: inv.vat }));
 const cu = store.state.partners.find(p => p.id === O('ORD-0001').customerId);
 check('new customer created from WhatsApp', cu && cu.phone === '01000000001' && cu.source === 'whatsapp');
 check('stock left freezer', E.setState(store.state) && E.available('it_FG-401', ['W4'], 1000) === 8000);
@@ -86,7 +86,7 @@ await runOp({ E, db, profile: owner, op: 'saveItem', args: [{ ...it, priceRetail
 r = await runOp({ E, db, profile: sales, op: 'decideOrder', args: [{ id: O('ORD-0003').id, action: 'approve' }] });
 check('price change: sales blocked', r.status === 400 && r.body.error.includes('السعر اتغير'), r.body.error);
 r = await runOp({ E, db, profile: owner, op: 'decideOrder', args: [{ id: O('ORD-0003').id, action: 'approve' }] });
-check('price change: owner approves at order price', r.status === 200 && store.state.docs.invoices.at(-1).total === 97000, r.body.error);
+check('price change: owner approves at order price', r.status === 200 && store.state.docs.invoices.at(-1).total === 107000, r.body.error);
 // InstaPay: order -> screenshot -> owner says "not received" -> new screenshot -> owner says "received" (approve + receipt in one step)
 r = await runShop({ E, db, action: 'order', body: { order: order({ phone: '01055555555', method: 'instapay', lines: [{ productId: 'it_FG-401', packSize: 500, count: 2 }] }) }, telegram });
 const ipNo = r.body.result.no, ipId = r.body.result.id;

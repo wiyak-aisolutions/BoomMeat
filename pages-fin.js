@@ -7,6 +7,9 @@ const { esc, tx, fm, fm0, kgf, qtyf, pct, df, tf, packName, toG, toP, toI, canCo
 /* ========== WHATSAPP ORDERS (placed by the bot, approved here → invoice on account; collected on delivery) ========== */
 const OSTAT = { pending: ['warn', 'مستني موافقة'], approved: ['ok', 'متوافق عليه'], rejected: ['bad', 'مرفوض'] };
 const opack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
+const ofee = o => o.fee != null ? o.fee : (o.delivery && o.delivery.fee) || 0; // new orders carry the fixed delivery fee
+const ogrand = o => o.total + ofee(o);
+const ostage = o => o.deliveredAt ? '<span class="pill ok">اتسلّم ✓</span>' : o.outAt ? '<span class="pill info">في الطريق 🚚</span>' : '';
 PAGES.orders = () => {
   const s = S(), all = (s.docs.orders || []).slice().reverse();
   const tb = tabs('ord', [['all', 'الكل'], ['pending', 'مستنية'], ['approved', 'متوافق عليها'], ['rejected', 'مرفوضة']], 'pending');
@@ -16,16 +19,16 @@ PAGES.orders = () => {
       <div class="oc-a"><b class="mono">${esc(o.no)}</b>${o.test ? '<span class="pill mut">تجربة</span>' : ''}<small>${tf(o.at)}</small></div>
       <div class="oc-b"><b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<small class="mono">${esc(o.phone)}</small></div>
       <div class="oc-c">${o.lines.map(l => `<span>${l.count} × ${esc(l.name)} <em>${opack(l.packSize)}</em></span>`).join('')}</div>
-      <div class="oc-d"><b>${fm(o.total)} ج</b><small>${E.ORDER_METHODS[o.method] || ''}${o.proof ? (o.proof.status === 'ok' ? ' · ✅ التحويل وصل' : o.proof.status === 'rejected' ? ' · ❌ التحويل موصلش' : ' · 📎 صورة تحويل مستنية') : ''}</small></div>
-      <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}</div>
+      <div class="oc-d"><b>${fm(ogrand(o))} ج</b><small>${E.ORDER_METHODS[o.method] || ''}${o.proof ? (o.proof.status === 'ok' ? ' · ✅ التحويل وصل' : o.proof.status === 'rejected' ? ' · ❌ التحويل موصلش' : ' · 📎 صورة تحويل مستنية') : ''}</small></div>
+      <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}${ostage(o)}</div>
       <span class="oc-go" aria-hidden="true">${ic('menu')}</span></a>`;
-  page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, o => o.total))} ج شامل الضريبة</span></div>
-      <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => o.total))} ج</span></div></div>
+  page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, ogrand))} ج شامل الضريبة والتوصيل</span></div>
+      <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => ogrand(o) - (o.paidAmount || 0)))} ج</span></div></div>
     <div class="bar">${tb.html}${searchBox('oq', 'ابحث برقم الطلب أو الاسم أو التليفون')}</div>
     <div class="ocs">${rows.map(card).join('') || '<div class="card"><div class="bd"><div class="empty">مفيش طلبات هنا</div></div></div>'}</div>
     <p class="crumb" style="margin-top:12px">دوس على أي طلب تشوف تفاصيله وصورة التحويل ومين وافق عليه.${all.some(o => o.test) ? ' الطلبات اللي عليها «تجربة» جاية من رقم تجربة البوت: مبتتحولش لفاتورة، فمفيهاش موافقة.' : ''}</p>`);
 };
-const OACT = { placed: 'وصل الطلب من الواتساب', delivery: 'اتحدد التوصيل', send: 'اتبعت للعميل', proof: 'العميل بعت صورة التحويل', proof_rejected: 'التحويل موصلش، واتطلب من العميل يبعته تاني', approved: 'اتوافق على الطلب واتعملت الفاتورة', rejected: 'اترفض الطلب', paid: 'اتسجل إن الفلوس اتحصّلت', invoice_sent: 'الفاتورة اتبعتت للعميل على الواتساب', confirm_sent: 'تأكيد الأوردر اتبعت للعميل', edited: 'اتعدّل الطلب', deleted: 'اتمسح' };
+const OACT = { placed: 'وصل الطلب من الواتساب', delivery: 'اتحدد التوصيل', send: 'اتبعت للعميل', proof: 'العميل بعت صورة التحويل', proof_rejected: 'التحويل موصلش، واتطلب من العميل يبعته تاني', approved: 'اتوافق على الطلب واتعملت الفاتورة', rejected: 'اترفض الطلب', paid: 'اتسجل إن الفلوس اتحصّلت', proof_ok: 'التحويل وصل', out: 'الأوردر خرج للتوصيل', delivered: 'الأوردر وصل للعميل واتقفل', invoice_sent: 'الفاتورة اتبعتت للعميل على الواتساب', confirm_sent: 'تأكيد الأوردر اتبعت للعميل', edited: 'اتعدّل الطلب', deleted: 'اتمسح' };
 const PSTAT = { pending: '<span class="pill warn">مستنية مراجعة</span>', ok: '<span class="pill ok">التحويل وصل</span>', rejected: '<span class="pill bad">التحويل موصلش</span>' };
 const whoName = by => by === 'bot' ? 'بوت الواتساب' : by === 'telegram' ? 'المالك من تليجرام' : by ? E.userName(by) : '—';
 function orderTimeline(o) {
@@ -54,10 +57,10 @@ const egp2 = p => (p / 100).toLocaleString('en-US', { minimumFractionDigits: 2, 
 // The receipt the customer gets, rendered from the order (+ the draft while reviewing)
 function receiptHTML(o, d) {
   const co = S().settings.company || {}, rate = S().settings.vatRate || 14;
-  const fee = d ? Math.round((parseFloat(d.fee) || 0) * 100) : (dlv(o).fee || 0);
+  const fee = o.fee != null ? o.fee : d ? Math.round((parseFloat(d.fee) || 0) * 100) : (dlv(o).fee || 0);
   const total = o.total + fee, net = Math.round(total * 100 / (100 + rate)), vat = total - net;
   const transferOk = o.proof && o.proof.status === 'ok';
-  const paid = o.receiptNo ? total : o.paidAmount ? o.paidAmount : transferOk ? o.total : 0, due = total - paid;
+  const paid = o.receiptNo ? total : o.paidAmount ? o.paidAmount : transferOk ? ogrand(o) : 0, due = total - paid;
   const eta = d ? (d.eta || '') : (dlv(o).eta && dlv(o).eta.text) || '', note = d ? d.note : dlv(o).note;
   const when = new Date((o.at || '').replace(' ', 'T'));
   const dt = isNaN(when) ? '' : when.toLocaleString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -89,14 +92,14 @@ function reviewPanel(o) {
   const head = !approved ? 'راجع الطلب قبل الموافقة' : sent ? 'اتبعت للعميل' : 'جاهز يتبعت للعميل';
   const sub = !approved ? 'حدد التوصيل وشوف الفاتورة زي ما العميل هيستلمها' : cash && !fullyPaid ? 'الكاش: العميل بيستلم التأكيد وميعاد التوصيل دلوقتي، والفاتورة بتتبعتله بعد التحصيل' : 'العميل هيستلم التأكيد وميعاد التوصيل والفاتورة';
   const form = `<div class="rv-form">
-      ${!approved ? `<label class="fld"><span>التوصيل (ج)</span><input class="f" id="rv-fee" type="number" inputmode="decimal" min="0" step="1" placeholder="0" value="${esc(d.fee)}"></label>` : `<div class="kv"><div><span>التوصيل</span><b>${dlv(o).fee ? fm(dlv(o).fee) + ' ج' : 'مجاني'}</b></div></div>`}
+      ${!approved && o.fee == null ? `<label class="fld"><span>التوصيل (ج)</span><input class="f" id="rv-fee" type="number" inputmode="decimal" min="0" step="1" placeholder="0" value="${esc(d.fee)}"></label>` : `<div class="kv"><div><span>التوصيل</span><b>${ofee(o) ? fm(ofee(o)) + ' ج' : 'مجاني'}</b></div></div>`}
       <label class="fld"><span>ميعاد التوصيل</span><input class="f" id="rv-eta" maxlength="80" placeholder="مثلاً: خلال ساعتين" value="${esc(d.eta)}"></label>
       <div class="chips rv-chips">${ETA_CHIPS.map(t => `<button type="button" class="chip ${d.eta === t ? 'on' : ''}" data-act="rv-eta" data-arg="${esc(t)}">${t}</button>`).join('')}</div>
       <label class="fld"><span>ملاحظة للعميل (اختياري)</span><input class="f" id="rv-note" maxlength="160" placeholder="مثلاً: المندوب هيكلمك قبلها بنص ساعة" value="${esc(d.note)}"></label>
       <div class="rv-acts">${!approved
         ? (o.test ? '<div class="note">ده طلب تجربة: مينفعش يتوافق عليه.</div>' : `<button class="btn p lg" data-act="rv-approve" data-arg="${o.id}">${ic('check')} وافق واعمل الفاتورة</button>`)
         : `<button class="btn p lg" data-act="rv-send" data-arg="${o.id}">${ic('send')} ${sent ? 'ابعت للعميل تاني' : 'ابعت للعميل'}</button>${dlv(o).setAt ? `<button class="btn" data-act="rv-eta-save" data-arg="${o.id}">غيّر ميعاد التوصيل بس</button>` : ''}`}</div>
-      ${approved && cash && !fullyPaid ? '<div class="note info">الفاتورة لسه متبعتتش. بتتبعت للعميل لوحدها أول ما تدوس «الفلوس اتحصّلت».</div>' : ''}
+      ${approved && cash && !fullyPaid ? '<div class="note info">الفاتورة لسه متبعتتش. بتتبعت للعميل لوحدها أول ما تدوس «الأوردر وصل» (الكاش بيتسجل ساعتها).</div>' : ''}
     </div>`;
   return `<div class="card rv"><div class="hd"><h3>${head}</h3><span class="sub">${sub}</span></div><div class="bd rv-grid">${form}<div class="rv-prev"><small class="crumb">اللي العميل هيستلمه على الواتساب</small><div id="rv-receipt">${receiptHTML(o, d)}</div></div></div></div>`;
 }
@@ -105,22 +108,28 @@ PAGES.order = id => {
   const c = o.customerId ? S().partners.find(p => p.id === o.customerId) : null;
   const canAct = ['owner', 'sales', 'accountant'].includes(U.role());
   const proofWaiting = o.proof && o.proof.status === 'pending' && !o.receiptNo;
+  const canShip = o.status === 'approved' && !o.test && !o.deliveredAt && (o.method !== 'instapay' || !!o.receiptNo); // InstaPay ships once the money is in
   const acts = !canAct ? '' : (proofWaiting ? `<button class="btn p" data-act="ord-proof-ok" data-arg="${o.id}">${ic('check')} التحويل وصل</button><button class="btn" data-act="ord-nopay" data-arg="${o.id}">التحويل موصلش</button>` : '')
-    + (o.status === 'approved' && !o.receiptNo ? `<button class="btn ${proofWaiting ? '' : 'p'}" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} الفلوس اتحصّلت</button>` : '')
+    + (o.status === 'approved' && !o.receiptNo && o.method === 'instapay' && !proofWaiting ? `<button class="btn" data-act="ord-paid" data-arg="${o.id}">${ic('cash')} الفلوس اتحصّلت</button>` : '')
+    + (canShip && !o.outAt ? `<button class="btn ${proofWaiting ? '' : 'p'}" data-act="ord-out" data-arg="${o.id}">🚚 الأوردر خرج</button>` : '')
+    + (canShip ? `<button class="btn ${o.outAt ? 'p' : ''}" data-act="ord-delivered" data-arg="${o.id}">${ic('check')} الأوردر وصل</button>` : '')
     + (o.status === 'pending' ? `<button class="btn" data-act="ord-no" data-arg="${o.id}">ارفض الطلب</button>` : '')
     + (o.test ? `<button class="btn dan" data-act="ord-del" data-arg="${o.id}">امسح طلب التجربة</button>` : '');
   const wa = U.waLink(o.phone);
-  page(`طلب ${esc(o.no)}`, `<div class="bar"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : ''}${o.test ? '<span class="pill mut">تجربة</span>' : ''}<span class="grow"></span>${acts}</div>
-    ${canAct && o.status !== 'rejected' ? reviewPanel(o) : ''}
+  page(`طلب ${esc(o.no)}`, `<div class="bar"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : ''}${ostage(o)}${o.test ? '<span class="pill mut">تجربة</span>' : ''}<span class="grow"></span>${acts}</div>
+    ${canAct && o.status !== 'rejected' && !o.deliveredAt ? reviewPanel(o) : ''}
     <div class="grid g-main">
+      <div style="display:grid;gap:16px;align-content:start">
       <div class="card"><div class="hd"><h3>الطلب</h3><span class="sub">${tf(o.at)}</span></div><div class="bd">
         <div class="tw"><table class="t"><thead><tr><th>المنتج</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">القيمة</th></tr></thead><tbody>
           ${o.lines.map(l => `<tr><td class="nm"><b>${esc(l.name)}</b></td><td>${opack(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n"><b>${fm(l.amount)}</b></td></tr>`).join('')}
-          ${dlv(o).fee ? `<tr><td class="nm">التوصيل</td><td></td><td></td><td></td><td></td><td class="n">${fm(dlv(o).fee)}</td></tr>` : ''}
-          <tr class="tot"><td colspan="5">الإجمالي شامل الضريبة</td><td class="n">${fm(o.total + (dlv(o).fee || 0))}</td></tr></tbody></table></div>
+          ${ofee(o) ? `<tr><td class="nm">التوصيل</td><td></td><td></td><td></td><td></td><td class="n">${fm(ofee(o))}</td></tr>` : ''}
+          <tr class="tot"><td colspan="5">الإجمالي شامل الضريبة${ofee(o) ? ' والتوصيل' : ''}</td><td class="n">${fm(ogrand(o))}</td></tr></tbody></table></div>
         ${o.note ? `<div class="note" style="margin-top:12px"><b>ملاحظة العميل:</b> ${esc(o.note)}</div>` : ''}
         ${o.reason ? `<div class="note bad" style="margin-top:12px"><b>سبب الرفض:</b> ${esc(o.reason)}</div>` : ''}
       </div></div>
+      <div class="card"><div class="hd"><h3>اللي حصل في الطلب</h3><span class="sub">مين عمل إيه وإمتى</span></div><div class="bd">${orderTimeline(o)}</div></div>
+      </div>
       <div style="display:grid;gap:16px;align-content:start">
         <div class="card"><div class="hd"><h3>العميل</h3></div><div class="bd">
           <div class="kv"><div><span>الاسم</span><b>${c ? `<a href="#customer/${esc(c.id)}">${esc(o.name)}</a>` : esc(o.name)}</b></div><div><span>التليفون</span><b class="mono">${esc(o.phone)}</b></div><div><span>النوع</span><b>${o.kind === 'wholesale' ? 'جملة' : 'قطاعي'}</b></div><div><span>الدفع</span><b>${E.ORDER_METHODS[o.method] || '—'}</b></div></div>
@@ -128,7 +137,6 @@ PAGES.order = id => {
           <div class="bar" style="margin:0">${wa}${o.location && o.location.lat ? `<a class="btn" href="https://maps.google.com/?q=${encodeURIComponent(o.location.lat + ',' + o.location.lng)}" target="_blank" rel="noopener">${ic('send')} افتح اللوكيشن</a>` : ''}${o.invoiceId ? `<a class="btn" href="#invoice/${esc(o.invoiceId)}">${ic('bill')} الفاتورة ${esc(o.invoiceNo)}</a>` : ''}</div>
         </div></div>
         <div class="card"><div class="hd"><h3>صورة التحويل</h3>${o.proof ? `<span class="sub">${tf(o.proof.at)}</span><div class="tools">${PSTAT[o.proof.status || 'pending']}</div>` : ''}</div><div class="bd" id="proof-box">${o.proof ? '<div class="empty">بتحمّل الصورة…</div>' : `<div class="empty">${o.method === 'instapay' ? 'العميل لسه مبعتش صورة التحويل.' : 'الدفع كاش عند الاستلام، مفيش تحويل.'}</div>`}</div></div>
-        <div class="card"><div class="hd"><h3>اللي حصل في الطلب</h3><span class="sub">مين عمل إيه وإمتى</span></div><div class="bd">${orderTimeline(o)}</div></div>
       </div>
     </div>`, { crumb: '<a href="#orders">طلبات واتساب</a> / ' + esc(o.no) });
   // live preview while typing (no full re-render, so focus stays in the field)
@@ -160,10 +168,16 @@ const ordOf = id => (S().docs.orders || []).find(o => o.id === id);
 ACTS['ord-ok'] = id => { const o = ordOf(id); modal(`موافقة على ${esc(o.no)}`, `<p>هتتعمل فاتورة <b>آجل</b> بـ <b>${fm(o.total)}</b> (شامل الضريبة) على <b>${esc(o.name)}</b>، وهيتخصم من الفريزر:</p><p>${o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>')}</p><p>الدفع عند التسليم: ${E.ORDER_METHODS[o.method]}.</p>`, { saveText: 'وافق واعمل الفاتورة', save: async () => { await E.decideOrder({ id, action: 'approve' }); U.afterChange(); toast('اتوافق على الطلب واتعملت الفاتورة', 'ok'); } }); };
 ACTS['ord-no'] = id => { const o = ordOf(id); modal(`رفض ${esc(o.no)}`, `<p class="crumb">البوت هيبلغ العميل على الواتساب بلطف إن الطلب مش هيكمل.</p><label class="fld"><span>السبب (اختياري)</span><input class="f" id="ord-reason" maxlength="200" placeholder="مثلاً: العنوان برا منطقة التوصيل"></label>`, { saveText: 'ارفض الطلب', save: async () => { await E.decideOrder({ id, action: 'reject', reason: val('ord-reason') }); U.afterChange(); toast('اترفض الطلب', 'ok'); } }); };
 ACTS['ord-paid'] = id => { const o = ordOf(id); const insta = o.method === 'instapay';
-  modal(insta ? `التحويل وصل · ${esc(o.no)}` : `تحصيل ${esc(o.no)}`, `<p>${insta ? 'اتأكدت إن التحويل وصل حسابك؟' : 'الفلوس اتحصّلت من العميل؟'} هيتسجل تحصيل <b>${fm(o.total)} ج</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]})${o.status === 'pending' ? '، والطلب هيتوافق عليه وتتعمل فاتورته' : ''}.</p><p class="crumb">العميل هيجيله على الواتساب «تم دفع الأوردر» وفاتورته.</p>`,
+  modal(insta ? `التحويل وصل · ${esc(o.no)}` : `تحصيل ${esc(o.no)}`, `<p>${insta ? 'اتأكدت إن التحويل وصل حسابك؟' : 'الفلوس اتحصّلت من العميل؟'} هيتسجل تحصيل <b>${fm(ogrand(o) - (o.paidAmount || 0))} ج</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]})${o.status === 'pending' ? '، والطلب هيتوافق عليه وتتعمل فاتورته' : ''}.</p><p class="crumb">العميل هيجيله على الواتساب «تم دفع الأوردر» وفاتورته.</p>`,
   { saveText: insta ? 'أيوه، التحويل وصل' : 'سجّل التحصيل', save: async () => { await E.decideOrder({ id, action: 'paid' }); U.afterChange(); toast('اتسجل الدفع والعميل هيجيله التأكيد', 'ok'); } }); };
 ACTS['ord-nopay'] = id => { const o = ordOf(id); modal(`التحويل موصلش · ${esc(o.no)}`, `<p>البوت هيقول لـ <b>${esc(o.name)}</b> إن التحويل موصلش، ويطلب منه يبعت صورة التحويل تاني.</p><label class="fld"><span>السبب (اختياري)</span><input class="f" id="np-reason" maxlength="200" placeholder="مثلاً: المبلغ مش مطابق"></label>`,
   { saveText: 'ابعت للعميل', save: async () => { await E.decideOrder({ id, action: 'nopay', reason: val('np-reason') }); U.afterChange(); toast('اتبعت للعميل يبعت التحويل تاني', 'ok'); } }); };
+ACTS['ord-out'] = id => { const o = ordOf(id), due = ogrand(o) - (o.receiptNo ? ogrand(o) : o.paidAmount || 0);
+  modal(`الأوردر خرج · ${esc(o.no)}`, `<p>الأوردر خرج مع المندوب؟ <b>${esc(o.name)}</b> هيجيله على الواتساب «طلبك في الطريق 🚚»${due > 0 ? `، ونفكّره يجهّز <b>${fm(due)} ج</b> عند الاستلام` : ''}.</p>`,
+  { saveText: 'أيوه، خرج', save: async () => { await E.decideOrder({ id, action: 'out' }); U.afterChange(); toast('اتسجل إن الأوردر خرج والعميل هيجيله رسالة', 'ok'); } }); };
+ACTS['ord-delivered'] = id => { const o = ordOf(id), cashDue = !o.receiptNo ? ogrand(o) - (o.paidAmount || 0) : 0;
+  modal(`الأوردر وصل · ${esc(o.no)}`, `<p>الأوردر وصل لـ <b>${esc(o.name)}</b>؟ الطلب هيتقفل.</p>${cashDue > 0 ? `<p>هيتسجل تحصيل <b>${fm(cashDue)} ج</b> كاش، والعميل هيجيله «تم الدفع» وفاتورته على الواتساب.</p>` : ''}`,
+  { saveText: cashDue > 0 ? 'أيوه، وصل واتحصّل' : 'أيوه، وصل', save: async () => { await E.decideOrder({ id, action: 'delivered' }); U.afterChange(); toast('الأوردر اتقفل', 'ok'); } }); };
 ACTS['ord-resend'] = id => run(() => E.decideOrder({ id, action: 'resend' }), 'الفاتورة هتتبعت للعميل تاني');
 ACTS['ord-del'] = id => run(() => E.decideOrder({ id, action: 'delete' }), 'اتمسح طلب التجربة');
 
@@ -544,6 +558,7 @@ PAGES.settings = () => {
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="st-tg" ${st.telegram ? 'checked' : ''}> ابعت التنبيهات على تليجرام</label>
       <div class="fgrid"><label class="fld"><span>توكن البوت (من BotFather)</span><input class="f" id="st-tk" value="${U.LIVE ? '' : esc(st.tgToken)}" placeholder="${U.LIVE ? 'متخزن على السيرفر، اكتب توكن جديد لو عايز تغيّره' : ''}" dir="ltr" autocomplete="off"></label><label class="fld"><span>رقم الشات أو الجروب (chat id)</span><input class="f" id="st-ch" value="${esc(st.tgChat)}" dir="ltr"></label></div>
       ${U.LIVE ? `<div class="note ${st.tgChat ? 'ok' : 'info'}">${st.tgChat ? '✓ تليجرام متوصل بحساب المالك.' : 'تليجرام لسه مش متوصل.'} دوس "اربط تليجرام" وافتح البوت من الموبايل اللي عليه تليجرام بتاعك، وبعدين دوس Start.</div><div class="bar"><button class="btn p" data-act="tg-link">${st.tgChat ? 'اربط حساب تاني' : 'اربط تليجرام'}</button></div>` : ''}
+      ${U.LIVE ? `<div class="tgv"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b>متابعين تليجرام</b><div class="crumb">بيوصلهم نفس التنبيهات ويسألوا البوت، بس مبيوافقوش على حاجة.</div></div><button class="btn" data-act="tgv-add">${ic('plus')} ضيف متابع</button></div><div id="tgv-box" class="crumb" style="margin-top:8px">جاري التحميل…</div></div>` : ''}
       <div class="bar"><button class="btn" data-act="tg-test">${ic('send')} إرسال رسالة تجربة</button><span class="crumb">بيتبعت: تجاوز حد الصرف، طلبات التصحيح، الأصناف اللي قربت تخلص، والصلاحيات.</span></div>
       <div class="note">${U.LIVE ? 'التوكن بيتحفظ على السيرفر بس، ومحدش يقدر يشوفه من الشاشات.' : 'في نسخة التدريب التوكن بيتحفظ على الجهاز ده بس.'}</div></div></div>
     <div class="bar"><button class="btn p lg" data-act="st-save">حفظ الإعدادات</button></div>
@@ -551,6 +566,7 @@ PAGES.settings = () => {
       <div class="note bad">بعد ما تخلصوا تجربة: الزرار ده بيمسح <b>كل الحركات</b> (القيود، الفواتير، التشغيلات، المخزون، أرصدة البداية) ويرجّع الحسابات صفر. الأصناف والأسعار والوصفات والعملاء والموردين والمستخدمين بيفضلوا زي ما هم. والسيرفر بيحتفظ بنسخة من اللي قبل التصفير.</div>
       <div><button class="btn dan" data-act="st-golive">تصفير الحسابات وبدء التشغيل</button></div></div></div>
     <div class="card"><div class="hd"><h3>البيانات</h3></div><div class="bd bar"><button class="btn" data-act="st-export">تنزيل نسخة احتياطية (JSON)</button>${U.LIVE ? '<span class="crumb">السيرفر كمان بيحفظ نسخة كاملة كل يوم تلقائي.</span>' : '<button class="btn dan" data-act="st-reset">إعادة البيانات التجريبية من الأول</button>'}</div></div>`);
+  if (U.LIVE) setTimeout(loadViewers);
 };
 ACTS['st-save'] = () => run(async () => {
   const tk = val('st-tk').trim();
@@ -564,6 +580,27 @@ ACTS['tg-link'] = async () => {
     modal('ربط تليجرام', `<div class="note info">افتح اللينك ده من الموبايل اللي عليه تليجرام بتاعك، ودوس <b>Start</b>. الكود صالح ١٥ دقيقة ولمرة واحدة.</div><a class="btn p lg" style="justify-content:center" href="${link}" target="_blank" rel="noopener">فتح البوت @${esc(r.result.bot)}</a><div class="crumb" style="text-align:center">ولو بتفتح من الكمبيوتر: ابعت للبوت <span class="mono">/start ${esc(r.result.code)}</span></div>`, { foot: '<button class="btn" data-act="tg-check">خلصت</button>' });
   } catch (e) { toast(e.message, 'bad'); }
 };
+async function loadViewers() {
+  const box = document.getElementById('tgv-box'); if (!box) return;
+  try {
+    const r = await U.api('tgViewers', {}); const list = r.result || [];
+    if (!document.getElementById('tgv-box')) return;
+    box.innerHTML = list.length ? `<div class="list">${list.map(v => `<div class="li"><div class="x"><b>${esc(v.name)}</b><small>متابع من ${esc(String(v.at || '').slice(0, 10))}</small></div><button class="btn sm dan" data-act="tgv-rm" data-arg="${esc(v.chat)}">شيله</button></div>`).join('')}</div>` : 'مفيش متابعين لسه.';
+  } catch (e) { box.textContent = e.message; }
+}
+ACTS['tgv-add'] = async () => {
+  try {
+    const r = await U.api('tgViewerLink', {}); const link = r.result.link;
+    const msg = `ده لينك متابعة تنبيهات بوم ميت على تليجرام. افتحه ودوس Start:\n${link}`;
+    modal('ضيف متابع', `<div class="note info">ابعت اللينك ده للشخص، يفتحه من تليجرام ويدوس <b>Start</b>. اللينك لمرة واحدة وصالح ٢٤ ساعة.</div>
+      <input class="f mono" id="tgv-link" value="${esc(link)}" readonly dir="ltr" style="text-align:left">
+      <div class="bar" style="justify-content:center"><a class="btn p" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">${ic('send')} ابعته على واتساب</a><button class="btn" data-act="tgv-copy">انسخ اللينك</button></div>
+      <div class="crumb" style="text-align:center">أول ما يدوس Start، هيوصلك على تليجرام إنه بقى متابع ومعاها زرار «شيله».</div>`, { foot: '<button class="btn" data-act="tgv-done">خلصت</button>' });
+  } catch (e) { toast(e.message, 'bad'); }
+};
+ACTS['tgv-copy'] = async () => { const i = document.getElementById('tgv-link'); try { await navigator.clipboard.writeText(i.value); } catch (e) { i.select(); document.execCommand('copy'); } toast('اتنسخ اللينك', 'ok'); };
+ACTS['tgv-done'] = () => { U.closeModal(); loadViewers(); };
+ACTS['tgv-rm'] = chat => modal('شيل المتابع', '<div class="note bad">مش هيوصله تنبيهات تاني، والبوت هيبطل يرد عليه.</div>', { saveText: 'شيله', save: async () => { await U.api('tgViewerRemove', { chat }); toast('اتشال', 'ok'); setTimeout(loadViewers); } });
 ACTS['tg-check'] = async () => { await reloadLive(); U.closeModal(); U.render(); toast(S().settings.tgChat ? 'تليجرام اتوصل ✓' : 'لسه مااتوصلش، دوس Start في البوت', S().settings.tgChat ? 'ok' : 'bad'); };
 ACTS['st-golive'] = () => modal('تصفير الحسابات', `<div class="note bad">هيتمسح ${S().journal.length} قيد و${S().docs.invoices.length} فاتورة و${S().docs.batches.length} تشغيلة وكل أرصدة المخزون. اكتب كلمة <b>تصفير</b> عشان تأكد.</div><input class="f" id="gl-c" autocomplete="off">`,
   { saveText: 'صفّر الحسابات', save: async () => { if (val('gl-c').trim() !== 'تصفير') throw new Error('اكتب كلمة تصفير بالظبط'); await E.resetBooks(); toast('الحسابات اتصفرت، ابدأ بأرصدة البداية', 'ok'); setTimeout(() => U.go('opening')); } });

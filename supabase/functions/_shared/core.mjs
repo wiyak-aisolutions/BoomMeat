@@ -21,7 +21,7 @@ function syncActor(E, profile) {
  * db: { load(): {version, state}, save(state, baseVersion): newVersion|null, log(entry), snapshot(day, state) }
  * telegram: async (text) => {ok, error}  (optional)
  */
-export async function runOp({ E, db, profile, op, args, telegram, maxRetries = 4 }) {
+export async function runOp({ E, db, profile, op, args, telegram, copy, maxRetries = 4 }) {
   if (!OPS.has(op)) return { status: 400, body: { error: 'عملية غير معروفة' } };
   if (!profile || !profile.active) return { status: 403, body: { error: 'الحساب ده موقوف' } };
   if (profile.role === 'pending') return { status: 403, body: { error: 'حسابك لسه مستني المالك يحدد صلاحياتك' } };
@@ -49,14 +49,14 @@ export async function runOp({ E, db, profile, op, args, telegram, maxRetries = 4
     if (op === 'resetBooks') await db.log({ user_id: profile.user_id, username: profile.username, op: 'backup_before_reset', args: row.state, ok: true, error: null, version: row.version });
     await db.log({ user_id: profile.user_id, username: profile.username, op, args, ok: true, error: null, version: v });
     if (db.snapshot) { try { await db.snapshot(E.today(), E.S, v); } catch (e) { /* snapshot is best-effort */ } }
-    if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram });
+    if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram, copy });
     return { status: 200, body: { ok: true, version: v, result: result === undefined ? null : JSON.parse(JSON.stringify(result)) } };
   }
   return { status: 409, body: { error: 'السيستم مشغول بعمليات تانية، جرّب تاني' } };
 }
 
 /* WhatsApp bot endpoint (shared key checked by the caller): read-only catalog/status, and placing pending orders */
-export async function runShop({ E, db, action, body, telegram, maxRetries = 4 }) {
+export async function runShop({ E, db, action, body, telegram, copy, maxRetries = 4 }) {
   const b = body || {};
   if (action === 'catalog' || action === 'status' || action === 'orderInfo' || action === 'proofTarget') {
     const row = await db.load(); E.setState(row.state);
@@ -68,7 +68,8 @@ export async function runShop({ E, db, action, body, telegram, maxRetries = 4 })
     return { status: 200, body: { ok: true, result } };
   }
   // writes the bot may do: place an order, attach a transfer screenshot, record that a message went out
-  const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind, image: b.image === true })] };
+  const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind, image: b.image === true })],
+    payLink: ['orderPayLink', () => b.link || {}], cardPaid: ['orderCardPaid', () => b.card || {}] }; // Paymob: link created / verified callback
   if (!WRITES[action]) return { status: 400, body: { error: 'طلب غير معروف' } };
   const [fn, argsOf] = WRITES[action];
   const who = { user_id: null, username: 'whatsapp-bot' };
@@ -85,13 +86,13 @@ export async function runShop({ E, db, action, body, telegram, maxRetries = 4 })
     if (v == null) continue;
     await db.log({ ...who, op: fn, args: argsOf(), ok: true, error: null, version: v });
     if (db.snapshot) { try { await db.snapshot(E.today(), E.S, v); } catch (e) { /* best-effort */ } }
-    if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram });
+    if (pending.length) await deliverAlerts({ E, db, ids: pending.map(a => a.id), telegram, copy });
     return { status: 200, body: { ok: true, version: v, result } };
   }
   return { status: 409, body: { error: 'السيستم مشغول، جرّب تاني' } };
 }
 
-async function deliverAlerts({ E, db, ids, telegram }) {
+async function deliverAlerts({ E, db, ids, telegram, copy }) {
   const S0 = E.S;
   const chat = S0.settings.tgChat;
   const status = {};
@@ -103,6 +104,7 @@ async function deliverAlerts({ E, db, ids, telegram }) {
     const icon = a.level === 'bad' ? '🔴' : a.level === 'warn' ? '🟠' : '🔵';
     const r = await telegram(chat, `${icon} بوم ميت\n${a.text}`);
     status[id] = r.ok ? ['sent', ''] : ['failed', r.error || ''];
+    if (copy) { try { await copy(`${icon} بوم ميت\n${a.text}`); } catch (_e) { /* viewers are best effort */ } } // people the owner invited to watch
   }
   // write statuses back (best effort, never overwrite a newer version)
   for (let i = 0; i < 3; i++) {

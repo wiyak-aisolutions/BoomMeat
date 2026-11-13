@@ -3,6 +3,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
 import { runOp, runAdmin } from '../_shared/core.mjs';
 import { notifyBot } from '../_shared/notify.ts';
+import { copyText, getViewers, setViewers, MAX_VIEWERS } from '../_shared/viewers.ts';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
@@ -82,6 +83,23 @@ Deno.serve(async (req) => {
       const r = await telegram(String(args?.chat || ''), '✅ بوم ميت: تنبيهات السيستم اتوصلت بتليجرام');
       return json(r.ok ? 200 : 400, r.ok ? { ok: true } : { error: r.error });
     }
+    if (['tgViewerLink', 'tgViewers', 'tgViewerRemove'].includes(op)) { // people who watch on Telegram without approving anything
+      if (!profile || !profile.active || profile.role !== 'owner') return json(403, { error: 'الصلاحية دي للمالك بس' });
+      const list = await getViewers(admin);
+      if (op === 'tgViewers') return json(200, { ok: true, result: list });
+      if (op === 'tgViewerLink') {
+        if (list.length >= MAX_VIEWERS) return json(400, { error: `أقصى عدد ${MAX_VIEWERS} متابعين. شيل حد الأول.` });
+        const b = new Uint8Array(10); crypto.getRandomValues(b);
+        const code = Array.from(b, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
+        await auth.setSecret('tg_view_code', code); await auth.setSecret('tg_view_exp', String(Date.now() + 24 * 3600 * 1000));
+        return json(200, { ok: true, result: { link: `https://t.me/BoomMeat_bot?start=v${code}`, code: 'v' + code } });
+      }
+      const chat = String((Array.isArray(args) ? args[0] : args)?.chat || '');
+      const v = list.find(x => x.chat === chat); if (!v) return json(404, { error: 'المتابع ده مش موجود' });
+      await setViewers(admin, list.filter(x => x.chat !== chat));
+      await telegram(chat, 'المالك شالك من متابعين بوم ميت. مش هيوصلك تنبيهات تاني.');
+      return json(200, { ok: true });
+    }
     if (op === 'orderProofUrl') { // a short-lived link to an InstaPay screenshot (private bucket)
       if (!profile || !profile.active || !['owner', 'sales', 'accountant'].includes(profile.role)) return json(403, { error: 'الصلاحية دي مش متاحة لحسابك' });
       const row = await db.load(); const id = String((Array.isArray(args) ? args[0] : args)?.id || '');
@@ -90,7 +108,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.storage.from('order-proofs').createSignedUrl(o.proof.path, 600);
       return error ? json(500, { error: 'تعذر فتح الصورة' }) : json(200, { ok: true, result: { url: data.signedUrl } });
     }
-    const r = await runOp({ E, db, profile, op, args, telegram });
+    const r = await runOp({ E, db, profile, op, args, telegram, copy: (t: string) => copyText(admin, t) });
     if (r.status === 200 && op === 'decideOrder') { // tell the customer on WhatsApp
       const a = (Array.isArray(args) ? args[0] : args) || {};
       // approve no longer messages anyone: the order is reviewed (delivery fee + time) and then sent with «send».
@@ -99,7 +117,8 @@ Deno.serve(async (req) => {
       const o: any = r.body?.result || {};
       const kind = a.action === 'send' ? (o.receiptNo ? 'paid' : 'approved')
         : a.action === 'paid' ? (o.status === 'pending' ? 'proofok' : (o.receiptNo && o.sentAt ? 'paid' : ''))
-        : ({ proofok: 'proofok', nopay: 'nopay', eta: o.sentAt ? 'eta' : '', resend: 'resend', reject: 'rejected' } as Record<string, string>)[a.action] || '';
+        : a.action === 'delivered' ? (o.sentAt && (o.log || []).slice(-2)[0]?.action === 'paid' ? 'paid' : '') // cash collected at the door → invoice image
+        : ({ proofok: 'proofok', nopay: 'nopay', eta: o.sentAt ? 'eta' : '', resend: 'resend', reject: 'rejected', out: 'out' } as Record<string, string>)[a.action] || '';
       if (kind) await notifyBot(admin, a.id, kind);
     }
     return json(r.status, r.body);

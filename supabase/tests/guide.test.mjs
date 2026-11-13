@@ -167,7 +167,7 @@ fresh();
   ok(17, '«وافق» بتعمل فاتورة آجل', inv && inv.method === 'credit', inv && inv.method);
   ok(17, '«وافق» بتخصم العبوات من الفريزرات', stock0 - E.available(p.id, E.whs('fg'), 1000) === 2000);
   ok(17, 'العميل الجديد بيتضاف لوحده برقمه', S().partners.filter(x => x.type === 'customer').length === custs0 + 1 && S().partners.some(x => x.phone === '01077776666'));
-  ok(17, 'الأسعار شاملة الضريبة', inv.vatIncluded === true && inv.total === o1.total, `${inv.total} / ${o1.total}`);
+  ok(17, 'الأسعار شاملة الضريبة', inv.vatIncluded === true && inv.total === o1.total + (o1.fee || 0), `${inv.total} / ${o1.total}`);
   E.decideOrder({ id: o1.id, action: 'paid' });
   ok(17, '«اتحصّل» بتقفل المديونية', E.partnerBalance(o1.customerId) === 0, `باقي ${E.partnerBalance(o1.customerId)}`);
   const r2 = mk('01077776655'); const o2 = S().docs.orders.find(o => o.no === r2.no);

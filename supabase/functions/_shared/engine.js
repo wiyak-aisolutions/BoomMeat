@@ -95,7 +95,7 @@ function freshState() {
   return {
     version: DATA_VERSION, mode: 'demo', warehouses: JSON.parse(JSON.stringify(WAREHOUSES)), seq: {}, createdAt: new Date().toISOString(),
     settings: {
-      vatRate: 14, issueLimitKg: 100, fgShelfDays: 90, telegram: true, tgToken: '', tgChat: '',
+      vatRate: 14, issueLimitKg: 100, fgShelfDays: 90, deliveryFee: 10000, telegram: true, tgToken: '', tgChat: '',
       company: { name: 'بوم ميت للحوم', nameEn: 'Boom Meat', address: 'المنطقة الصناعية · مدينة ١٥ مايو · القاهرة', phone: '(+2) 01033004411', taxId: '000-000-000' },
     },
     users: [
@@ -492,10 +492,12 @@ function orders() { return S.docs.orders || (S.docs.orders = []); }
 function reservedQty(productId, packSize) { return orders().filter(o => o.status === 'pending').reduce((s, o) => s + o.lines.filter(l => l.productId === productId && l.packSize === packSize).reduce((a, l) => a + l.qty, 0), 0); }
 function orderable(productId, packSize) { return Math.max(0, available(productId, whs('fg'), packSize) - reservedQty(productId, packSize)); }
 const egpOf = p => p / 100;
+const deliveryFeeNow = () => (isInt(S.settings.deliveryFee) && S.settings.deliveryFee >= 0 ? S.settings.deliveryFee : 10000); // fixed delivery, piasters
+const orderGrand = o => o.total + (o.fee || 0); // what the customer pays: items + delivery (older orders had no fee on the order)
 function catalog(phone) { // read-only view for the bot: prices in EGP per kg, stock in whole packs not already promised to pending orders
   const c = customerByPhone(phone), kind = c && c.kind === 'wholesale' ? 'wholesale' : 'retail';
   return {
-    customer: c ? { name: c.name, kind } : null, kind, vatRate: S.settings.vatRate,
+    customer: c ? { name: c.name, kind } : null, kind, vatRate: S.settings.vatRate, deliveryFee: egpOf(deliveryFeeNow()),
     products: S.items.filter(i => i.cat === 'product' && i.active !== false).map(i => ({
       id: i.id, code: i.code, name: i.name, group: i.group || '', pricePerKg: egpOf(priceFor(i, { kind })), retailPerKg: egpOf(i.priceRetail), wholesalePerKg: egpOf(i.priceWholesale),
       packs: packsOf(i).map(size => ({ size, price: egpOf(mulDiv(size, priceFor(i, { kind }), 1000)), inStock: Math.floor(orderable(i.id, size) / size) })),
@@ -504,7 +506,7 @@ function catalog(phone) { // read-only view for the bot: prices in EGP per kg, s
 }
 function orderStatus(phone) {
   const n = normPhone(phone);
-  return orders().filter(o => o.phone === n).slice(-3).map(o => ({ no: o.no, status: o.status, total: egpOf(o.total), at: o.at, reason: o.reason || '' }));
+  return orders().filter(o => o.phone === n).slice(-3).map(o => ({ no: o.no, status: o.status, total: egpOf(orderGrand(o)), delivered: !!o.deliveredAt, out: !!o.outAt, at: o.at, reason: o.reason || '' }));
 }
 function olog(o, action, note) { (o.log || (o.log = [])).push({ at: stamp(today()), by: S.currentUser, action, note: String(note || '').slice(0, 200) }); if (o.log.length > 100) o.log.splice(0, o.log.length - 100); }
 function placeOrder({ phone, name, address, method, lines, note, test, expectTotal }) {
@@ -525,7 +527,7 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
     }
     const c = customerByPhone(ph), kind = c && c.kind === 'wholesale' ? 'wholesale' : 'retail';
     const o = { id: uid('OR'), no: test ? nextNo('TST') : nextNo('ORD'), channel: 'whatsapp', status: 'pending', test: !!test, date: today(), at: stamp(today()),
-      phone: ph, name: String(name).trim(), address: String(address).trim(), method, note: String(note || '').slice(0, 300), kind, customerId: c ? c.id : null, lines: [], total: 0 };
+      phone: ph, name: String(name).trim(), address: String(address).trim(), method, note: String(note || '').slice(0, 300), kind, customerId: c ? c.id : null, lines: [], total: 0, fee: deliveryFeeNow() };
     for (const ln of merged.values()) {
       const p = item(ln.productId), qty = ln.count * ln.packSize, left = orderable(p.id, ln.packSize);
       need(left >= qty, `${p.name} عبوة ${ln.packSize} جم: المتاح ${Math.floor(left / ln.packSize)} بس`);
@@ -533,13 +535,13 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
       o.lines.push({ productId: p.id, name: p.name, packSize: ln.packSize, count: ln.count, qty, pricePerKg, amount }); o.total += amount;
     }
     if (expectTotal != null) need(Math.round(expectTotal * 100) === o.total, `السعر اتغير: الإجمالي الصح ${money(o.total)}`);
-    olog(o, 'placed', `${o.lines.length} صنف · ${money(o.total)} · ${ORDER_METHODS[method]}`);
+    olog(o, 'placed', `${o.lines.length} صنف · ${money(orderGrand(o))} شامل التوصيل · ${ORDER_METHODS[method]}`);
     orders().push(o);
     const pack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
-    alert('info', 'order', `🛒 طلب واتساب ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${ph}\n${o.address}\n${o.lines.map(l => `• ${l.count} × ${l.name} ${pack(l.packSize)} = ${money(l.amount)}`).join('\n')}\nالإجمالي ${money(o.total)} شامل الضريبة · ${ORDER_METHODS[method]}${kind === 'wholesale' ? ' · عميل جملة' : ''}\nمستني موافقة من «طلبات واتساب»`, { type: 'order', id: o.id, no: o.no });
+    alert('info', 'order', `🛒 طلب واتساب ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${ph}\n${o.address}\n${o.lines.map(l => `• ${l.count} × ${l.name} ${pack(l.packSize)} = ${money(l.amount)}`).join('\n')}${o.fee ? `\n• التوصيل = ${money(o.fee)}` : ''}\nالإجمالي ${money(orderGrand(o))} شامل الضريبة والتوصيل · ${ORDER_METHODS[method]}${kind === 'wholesale' ? ' · عميل جملة' : ''}\nمستني موافقة من «طلبات واتساب»`, { type: 'order', id: o.id, no: o.no });
     if (o.test) S.alerts[S.alerts.length - 1].tg = 'test'; // test orders never reach the owner's Telegram
-    audit('order', o.no, `طلب واتساب ${o.no} من ${o.name}: ${money(o.total)}${o.test ? ' (تجربة)' : ''}`);
-    return { id: o.id, no: o.no, method, total: egpOf(o.total), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })) };
+    audit('order', o.no, `طلب واتساب ${o.no} من ${o.name}: ${money(orderGrand(o))}${o.test ? ' (تجربة)' : ''}`);
+    return { id: o.id, no: o.no, method, total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })) };
   });
 }
 function proofTarget(phone) { // the customer's latest InstaPay order that still waits for money
@@ -552,13 +554,13 @@ function orderProof({ phone, path }) {
     need(typeof path === 'string' && /^orders\/[\w-]+\/[\w.-]+$/.test(path), 'مسار الصورة غير صحيح');
     o.proof = { path, at: stamp(today()), status: 'pending' }; olog(o, 'proof', 'صورة تحويل إنستاباي');
     audit('order_proof', o.no, `صورة تحويل لطلب ${o.no}`);
-    return { id: o.id, no: o.no, test: o.test, name: o.name, phone: o.phone, total: egpOf(o.total) };
+    return { id: o.id, no: o.no, test: o.test, name: o.name, phone: o.phone, total: egpOf(orderGrand(o)) };
   });
 }
 function orderNotified({ id, kind, image }) { // image: the receipt picture went out (only then is the invoice "sent")
   return tx(() => {
     const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
-    need(['approved', 'paid', 'resend', 'nopay', 'rejected', 'proofok', 'eta'].includes(kind), 'نوع الرسالة غير معروف');
+    need(['approved', 'paid', 'resend', 'nopay', 'rejected', 'proofok', 'eta', 'out'].includes(kind), 'نوع الرسالة غير معروف');
     if (image === true && o.invoiceId) { o.invoiceSentAt = stamp(today()); olog(o, 'invoice_sent', kind); }
     else olog(o, 'confirm_sent', kind);
     return { ok: true };
@@ -568,11 +570,11 @@ function orderView(id) { // read-only: what the bot needs to message the custome
   const o = orders().find(x => x.id === id); if (!o) return null;
   const inv = o.invoiceId ? S.docs.invoices.find(v => v.id === o.invoiceId) : null;
   return { id: o.id, no: o.no, status: o.status, test: !!o.test, phone: o.phone, name: o.name, address: o.address, method: o.method, methodName: ORDER_METHODS[o.method], paid: !!o.receiptNo, reason: o.reason || '',
-    lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })), total: egpOf(o.total),
+    lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })), total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0),
     invoice: inv ? { no: inv.no, date: inv.date, net: egpOf(inv.net), vat: egpOf(inv.vat), total: egpOf(inv.total), vatRate: S.settings.vatRate, deliveryFee: egpOf(inv.deliveryFee || 0) } : null,
     delivery: o.delivery ? { fee: egpOf(o.delivery.fee || 0), eta: (o.delivery.eta && o.delivery.eta.text) || '', note: o.delivery.note || '' } : null,
     paidAmount: egpOf(o.receiptNo && inv ? inv.total : o.paidAmount || 0), due: inv ? egpOf(Math.max(0, inv.total - (o.receiptNo ? inv.total : o.paidAmount || 0))) : null,
-    receiptNo: o.receiptNo || '', sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt };
+    receiptNo: o.receiptNo || '', sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt, out: !!o.outAt, delivered: !!o.deliveredAt };
 }
 function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
   return tx(() => {
@@ -607,7 +609,7 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
       const changed = o.lines.filter(l => l.pricePerKg !== priceFor(item(l.productId), c));
       if (changed.length) need(me().role === 'owner', `السعر اتغير من وقت الطلب (${changed.map(l => l.name).join('، ')}). المالك بس يقدر يوافق بسعر الطلب`);
       let inv; orderCredit = true;
-      const fee = deliveryFee == null ? 0 : deliveryFee; need(isInt(fee) && fee >= 0 && fee <= 500000, 'رسوم التوصيل غير صحيحة');
+      const fee = o.fee != null ? o.fee : deliveryFee == null ? 0 : deliveryFee; need(isInt(fee) && fee >= 0 && fee <= 500000, 'رسوم التوصيل غير صحيحة'); // new orders carry the fixed fee; older ones keep the typed one
       const when = cleanEta(eta);
       try { inv = invoice({ date: T, customerId: c.id, lines: o.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: l.count, pricePerKg: l.pricePerKg })), method: 'credit', vatIncluded: true, deliveryFee: fee }); } finally { orderCredit = false; }
       o.delivery = { fee, eta: when, note: cleanNote(note), setBy: S.currentUser, setAt: stamp(T) };
@@ -616,11 +618,11 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
       olog(o, 'approved', `فاتورة ${inv.no}`);
       audit('order_approve', o.no, `موافقة على طلب واتساب ${o.no} ← فاتورة ${inv.no}`);
     };
-    if (action === 'approve') { approve(); if (o.proof && o.proof.status === 'ok') collect(o.total, 'تحويل إنستاباي'); return o; }
+    if (action === 'approve') { approve(); if (o.proof && o.proof.status === 'ok') collect(orderGrand(o), 'تحويل إنستاباي'); return o; }
     if (action === 'proofok') { // the owner checked the InstaPay transfer: it arrived
       need(o.proof && o.proof.status === 'pending' && !o.receiptNo, 'مفيش صورة تحويل مستنية مراجعة');
-      o.proof.status = 'ok'; olog(o, 'proof', 'التحويل وصل');
-      if (o.status === 'approved') collect(o.total, 'تحويل إنستاباي');
+      o.proof.status = 'ok'; olog(o, 'proof_ok', 'التحويل وصل');
+      if (o.status === 'approved') collect(orderGrand(o), 'تحويل إنستاباي');
       return o;
     }
     if (action === 'send') { // send the customer the confirmation, delivery time and (when paid) the invoice
@@ -638,7 +640,7 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
       need(!o.receiptNo, 'الطلب ده اتحصّل قبل كده');
       if (o.status === 'pending') { // InstaPay confirmed before review (Telegram «وصلت»): only mark the transfer, the invoice waits for the review
         need(o.proof && o.proof.status !== 'rejected', 'الطلب لازم يتوافق عليه الأول');
-        o.proof.status = 'ok'; olog(o, 'proof', 'التحويل وصل'); return o;
+        o.proof.status = 'ok'; olog(o, 'proof_ok', 'التحويل وصل'); return o;
       }
       need(o.status === 'approved', 'الطلب لازم يكون متوافق عليه');
       if (o.proof && o.proof.status === 'pending') o.proof.status = 'ok';
@@ -648,6 +650,17 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
     if (action === 'nopay') { // the transfer screenshot did not match a real transfer
       need(o.proof && !o.receiptNo, 'مفيش صورة تحويل مستنية مراجعة');
       o.proof.status = 'rejected'; olog(o, 'proof_rejected', String(reason || 'التحويل موصلش').slice(0, 200)); return o;
+    }
+    if (action === 'out') { // the order left with the driver
+      need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول'); need(!o.test, 'ده طلب تجربة'); need(!o.deliveredAt, 'الطلب ده اتسلّم خلاص');
+      need(o.method !== 'instapay' || o.receiptNo, 'التحويل لسه متأكدش: أكّد إن الفلوس وصلت الأول');
+      o.outAt = stamp(T); o.outBy = S.currentUser; olog(o, 'out', ''); return o;
+    }
+    if (action === 'delivered') { // the customer got it: closes the order (cash is collected on delivery)
+      need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول'); need(!o.test, 'ده طلب تجربة'); need(!o.deliveredAt, 'الطلب ده اتسلّم خلاص');
+      if (!o.receiptNo) { need(o.method !== 'instapay', 'التحويل لسه متأكدش: أكّد إن الفلوس وصلت الأول'); collect(invOf().total, 'كاش عند الاستلام'); if (o.sentAt && o.receiptNo) o.invoiceSentAt = stamp(T); }
+      if (!o.outAt) { o.outAt = stamp(T); o.outBy = S.currentUser; }
+      o.deliveredAt = stamp(T); o.deliveredBy = S.currentUser; olog(o, 'delivered', ''); return o;
     }
     if (action === 'resend') { need(o.status === 'approved' && o.invoiceId, 'الفاتورة بتتبعت بعد الموافقة'); olog(o, 'edited', 'طلب إعادة إرسال الفاتورة'); return o; }
     fail('عملية غير معروفة');
