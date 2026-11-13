@@ -349,7 +349,7 @@ function requestCorrection({ batchId, issueId, newQty, reason }) {
     const it = item(ln.itemId);
     const c = { id: uid('R'), no: nextNo('RQ'), batchId, issueId, itemId: ln.itemId, oldQty: ln.qty, newQty, reason: reason.trim(), status: 'pending', by: S.currentUser, at: stamp(today()) };
     S.docs.corrections.push(c);
-    alert('info', 'correction', `طلب تصحيح على ${b.no}: ${it.name} من ${fmtQty(ln.qty, it.unit)} إلى ${fmtQty(newQty, it.unit)} · السبب: ${c.reason}`, { type: 'batch', id: b.id, no: b.no });
+    alert('info', 'correction', `طلب تصحيح من ${userName(S.currentUser)} على ${b.no}: ${it.name} من ${fmtQty(ln.qty, it.unit)} إلى ${fmtQty(newQty, it.unit)} · السبب: ${c.reason}`, { type: 'batch', id: b.id, no: b.no });
     audit('correction_request', b.no, `طلب تصحيح ${c.no}: ${it.name} ${fmtQty(ln.qty, it.unit)} ← ${fmtQty(newQty, it.unit)}`);
     return c;
   });
@@ -555,11 +555,11 @@ function orderProof({ phone, path }) {
     return { id: o.id, no: o.no, test: o.test, name: o.name, phone: o.phone, total: egpOf(o.total) };
   });
 }
-function orderNotified({ id, kind }) {
+function orderNotified({ id, kind, image }) { // image: the receipt picture went out (only then is the invoice "sent")
   return tx(() => {
     const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
-    need(['approved', 'paid', 'resend', 'nopay', 'rejected'].includes(kind), 'نوع الرسالة غير معروف');
-    if (['approved', 'paid', 'resend'].includes(kind) && o.invoiceId) { o.invoiceSentAt = stamp(today()); olog(o, 'invoice_sent', kind); }
+    need(['approved', 'paid', 'resend', 'nopay', 'rejected', 'proofok', 'eta'].includes(kind), 'نوع الرسالة غير معروف');
+    if (image === true && o.invoiceId) { o.invoiceSentAt = stamp(today()); olog(o, 'invoice_sent', kind); }
     else olog(o, 'confirm_sent', kind);
     return { ok: true };
   });

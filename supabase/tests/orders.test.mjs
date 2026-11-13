@@ -114,7 +114,7 @@ r = await runOp({ E, db, profile: owner, op: 'decideOrder', args: [{ id: ipId, a
 check('cannot pay twice', r.status === 400);
 r = await runShop({ E, db, action: 'orderInfo', body: { id: ipId } });
 check('orderInfo for the invoice message', r.status === 200 && r.body.result.paid && r.body.result.invoice.no === ip.invoiceNo && r.body.result.invoice.total === r.body.result.total && r.body.result.invoice.net + r.body.result.invoice.vat === r.body.result.total && r.body.result.name, JSON.stringify(r.body));
-r = await runShop({ E, db, action: 'notified', body: { id: ipId, kind: 'paid' } });
+r = await runShop({ E, db, action: 'notified', body: { id: ipId, kind: 'paid', image: true } });
 check('invoice sent recorded', r.status === 200 && O(ipNo).invoiceSentAt && O(ipNo).log.at(-1).action === 'invoice_sent', JSON.stringify(r.body));
 r = await runOp({ E, db, profile: sales, op: 'decideOrder', args: [{ id: ipId, action: 'resend' }] });
 check('resend allowed after approval', r.status === 200, r.body.error);

@@ -68,7 +68,7 @@ export async function runShop({ E, db, action, body, telegram, maxRetries = 4 })
     return { status: 200, body: { ok: true, result } };
   }
   // writes the bot may do: place an order, attach a transfer screenshot, record that a message went out
-  const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind })] };
+  const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind, image: b.image === true })] };
   if (!WRITES[action]) return { status: 400, body: { error: 'طلب غير معروف' } };
   const [fn, argsOf] = WRITES[action];
   const who = { user_id: null, username: 'whatsapp-bot' };

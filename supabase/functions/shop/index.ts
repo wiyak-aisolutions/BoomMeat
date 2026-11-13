@@ -4,6 +4,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
 import { runShop } from '../_shared/core.mjs';
+import { receiptSvg } from '../_shared/receipt.mjs';
+import { initWasm, Resvg } from 'npm:@resvg/resvg-wasm@2.6.2';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
@@ -61,6 +63,29 @@ async function uploadProof(b: Record<string, string>) {
   }
   return json(200, { ok: true, result: o });
 }
+// Receipt image for WhatsApp: the approved design (receipt.mjs) drawn to PNG, stored privately, sent to WhatsApp as a short-lived link.
+// The renderer (wasm) and the fonts live in the same private bucket under assets/, so nothing outside Supabase is needed.
+let fontsP: Promise<Uint8Array[]> | null = null, wasmP: Promise<unknown> | null = null;
+async function asset(path: string) { const { data, error } = await admin.storage.from('order-proofs').download('assets/' + path); if (error || !data) throw new Error('asset ' + path); return new Uint8Array(await data.arrayBuffer()); }
+async function receipt(id: string) {
+  if (!/^[\w-]{1,40}$/.test(id)) return json(400, { error: 'bad_id' });
+  const row = await db.load(); E.setState(row.state);
+  const o = E.orderView(id);
+  if (!o || !o.invoice) return json(404, { error: 'no_invoice' });
+  try {
+    wasmP = wasmP || asset('resvg.wasm').then(b => initWasm(b));
+    fontsP = fontsP || Promise.all(['Cairo-400', 'Cairo-700', 'Cairo-800', 'Readex-700'].map(f => asset(`fonts/${f}.ttf`)));
+    const [, fonts] = await Promise.all([wasmP, fontsP]);
+    const { svg } = receiptSvg(o, (E.S.settings || {}).company || {});
+    const png = new Resvg(svg, { font: { fontBuffers: fonts, defaultFontFamily: 'Cairo', loadSystemFonts: false }, fitTo: { mode: 'zoom', value: 2 } }).render().asPng();
+    const path = `receipts/${id}/${Date.now()}.png`;
+    const up = await admin.storage.from('order-proofs').upload(path, png, { contentType: 'image/png', upsert: false });
+    if (up.error) return json(500, { error: 'upload_failed' });
+    const { data, error } = await admin.storage.from('order-proofs').createSignedUrl(path, 24 * 3600);
+    if (error) return json(500, { error: 'sign_failed' });
+    return json(200, { ok: true, result: { url: data.signedUrl, path, no: o.no, invoiceNo: o.invoice.no } });
+  } catch (e) { fontsP = null; return json(500, { error: 'render_failed', detail: String((e as Error).message || e).slice(0, 200) }); }
+}
 function same(a: string, b: string) { if (!a || a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
 
 Deno.serve(async (req) => {
@@ -70,6 +95,7 @@ Deno.serve(async (req) => {
     if (!want || !same(req.headers.get('x-shop-key') || '', want)) return json(401, { error: 'unauthorized' });
     const body = await req.json();
     if (body?.action === 'upload') return await uploadProof(body);
+    if (body?.action === 'receipt') return await receipt(String(body.id || ''));
     const r = await runShop({ E, db, action: body?.action, body, telegram });
     return json(r.status, r.body);
   } catch (e) { return json(500, { error: (e as Error).message || 'خطأ في السيرفر' }); }
