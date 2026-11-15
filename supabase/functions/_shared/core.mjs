@@ -5,6 +5,8 @@
 export const OPS = new Set([
   'purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch',
   'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff',
+  'deposit', 'payLiability', 'advance', 'advanceBack', 'custody', 'settleCustody', 'saveAccount', 'deleteAccount',
+  'openButchery', 'butcheryInput', 'butcheryPack', 'butcheryOutput', 'butcheryDropOutput', 'newCutItem', 'closeButchery', 'finishMeat', 'returnRework', 'updateAccess',
   'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck', 'decideOrder',
 ]);
 

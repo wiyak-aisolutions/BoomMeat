@@ -7,12 +7,14 @@ import { syncUser, runOp } from '../_shared/core.mjs';
 import { notifyBot } from '../_shared/notify.ts';
 import { ownerReply, MENU } from '../_shared/ownerbot.mjs';
 import { getViewers, setViewers, copyText, MAX_VIEWERS, VIEWER_NOTE } from '../_shared/viewers.ts';
+import { backupSheets, backupDue } from '../_shared/backup.mjs';
+import * as XLSX from 'npm:xlsx@0.18.5';
 
 // deno-lint-ignore no-explicit-any
 const E = (globalThis as any).ERP;
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const DOMAIN = 'boom-erp.local';
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-backup-key', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 async function secret(key: string) { const { data } = await admin.from('erp_secrets').select('value').eq('key', key).maybeSingle(); return data?.value || ''; }
@@ -29,11 +31,12 @@ const db = {
 };
 const esc = (s: string) => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
 
-const ROLE_AR: Record<string, string> = { owner: 'أدمن (كل الصلاحيات)', accountant: 'محاسب', storekeeper: 'أمين مخزن', supervisor: 'مشرف إنتاج', worker: 'عامل إنتاج', sales: 'مبيعات' };
+const ROLE_AR: Record<string, string> = { owner: 'أدمن (كل الصلاحيات)', accountant: 'محاسب', storekeeper: 'أمين مخزن', supervisor: 'مشرف إنتاج', worker: 'عامل إنتاج', packer: 'عامل تقفيل', sales: 'مبيعات' };
 const roleKeyboard = (id: string) => ({ inline_keyboard: [
   [{ text: '💼 محاسب', callback_data: `r:accountant:${id}` }, { text: '🛒 مبيعات', callback_data: `r:sales:${id}` }],
   [{ text: '📦 أمين مخزن', callback_data: `r:storekeeper:${id}` }, { text: '🧑‍🏭 مشرف إنتاج', callback_data: `r:supervisor:${id}` }],
-  [{ text: '🔪 عامل إنتاج', callback_data: `r:worker:${id}` }, { text: '👑 أدمن', callback_data: `a:owner:${id}` }],
+  [{ text: '🔪 عامل إنتاج', callback_data: `r:worker:${id}` }, { text: '📦 عامل تقفيل', callback_data: `r:packer:${id}` }],
+  [{ text: '👑 أدمن', callback_data: `a:owner:${id}` }],
   [{ text: '✅ قبول وأحدد بعدين', callback_data: `ok:${id}` }, { text: '❌ رفض', callback_data: `no:${id}` }],
 ] });
 const requestText = (p: { name: string, username: string, phone?: string }) => `🆕 <b>طلب حساب جديد · بوم ميت</b>\n\nالاسم: ${esc(p.name)}\nاسم الدخول: <code>${esc(p.username)}</code>\nالتليفون: ${esc(p.phone || '')}\n\nاختار صلاحيته، وهيقدر يدخل على طول:`;
@@ -234,6 +237,34 @@ async function telegramUpdate(u: Record<string, any>) {
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: act === 'ok' ? 'اتقبل' : 'اترفض' });
 }
 
+// daily Excel backup to the owner's Telegram: an hourly cron calls this with x-backup-key; it sends at 11:00 Cairo once a day
+// (force: true sends now, e.g. for a manual test)
+async function sendBackup(force: boolean) {
+  const now = E.cairoNow(), last = await secret('backup_last_day');
+  if (!force && !backupDue(now, last)) return json(200, { ok: true, skipped: true, at: now });
+  const chat = await secret('owner_chat'), token = await secret('telegram_token');
+  if (!chat || !token) return json(400, { error: 'تليجرام المالك مش متربط' });
+  const { data: row } = await admin.from('erp_state').select('state, version').eq('id', 1).maybeSingle();
+  if (!row) return json(500, { error: 'no state' });
+  E.setState(row.state);
+  const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+  for (const sh of backupSheets(E)) {
+    const ws = XLSX.utils.aoa_to_sheet(sh.rows);
+    ws['!cols'] = sh.rows[0].map((_: unknown, i: number) => ({ wch: Math.min(50, Math.max(10, ...sh.rows.map((r: unknown[]) => String(r[i] ?? '').length + 2))) }));
+    XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31));
+  }
+  const bytes = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  const fd = new FormData();
+  fd.append('chat_id', chat);
+  fd.append('caption', `📦 نسخة احتياطية يومية · ${now.date}\nكل الدفاتر في ملف Excel واحد (ملخص، الخزنة، العملاء، الموردين، الفواتير، المخزون، التشغيلات، القيود…).`);
+  fd.append('document', new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `boom-meat-backup-${now.date}.xlsx`);
+  const r = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: fd });
+  const out = await r.json().catch(() => ({}));
+  if (!out.ok) return json(502, { error: 'تليجرام رفض الملف', detail: out.description || r.status });
+  await setSecret('backup_last_day', now.date);
+  return json(200, { ok: true, sent: now.date, version: row.version });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json(405, { error: 'POST only' });
@@ -244,6 +275,13 @@ Deno.serve(async (req) => {
       if (!want || tgSecret !== want) return json(401, { error: 'bad secret' });
       await telegramUpdate(await req.json());
       return json(200, { ok: true });
+    }
+    const bk = req.headers.get('x-backup-key');
+    if (bk !== null) {
+      const want = await secret('backup_key');
+      if (!want || bk !== want) return json(401, { error: 'bad key' });
+      const b = await req.json().catch(() => ({}));
+      return await sendBackup(!!(b && b.force));
     }
     const body = await req.json();
     if (body && body.action === 'request') return await requestAccount(body);

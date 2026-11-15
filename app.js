@@ -52,7 +52,7 @@ new MutationObserver(muts => { if (LANG !== 'en') return; for (const m of muts) 
   .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
 applyLang();
 const tf = at => at ? `<span style="white-space:nowrap">${df(at)} · ${at.slice(11, 16)}</span>` : '—';
-const packName = s => ({ 250: '¼ كيلو', 500: '½ كيلو', 1000: '1 كيلو', 1500: '1.5 كيلو', 2000: '2 كيلو', 2500: '2.5 كيلو' })[s] || (s / 1000 + ' كجم');
+const packName = s => ({ 200: '200 جرام', 250: '¼ كيلو', 500: '½ كيلو', 1000: '1 كيلو', 1500: '1.5 كيلو', 2000: '2 كيلو', 2500: '2.5 كيلو' })[s] || (s < 1000 ? s + ' جرام' : s / 1000 + ' كجم');
 const toG = v => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? Math.round(n * 1000) : NaN; };
 const toP = v => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? Math.round(n * 100) : NaN; };
 const toI = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : NaN; };
@@ -84,30 +84,31 @@ const ALL = ['owner', 'accountant', 'storekeeper', 'supervisor', 'sales'];
 const PAGES = {};
 const NAV = [
   ['', [['home', 'نظرة عامة', 'home', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
-  ['الإنتاج والمخازن', [['batches', 'التشغيلات', 'batch', ['owner', 'supervisor', 'accountant']], ['worker', 'شاشة العامل', 'hand', ['owner', 'supervisor', 'worker']], ['cutting', 'التقطيع', 'knife', ['owner', 'supervisor', 'storekeeper', 'accountant']], ['stock', 'المخزون والدفعات', 'box', ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales']]]],
+  ['الإنتاج والمخازن', [['batches', 'التشغيلات', 'batch', ['owner', 'supervisor', 'accountant']], ['worker', 'شاشة العامل', 'hand', ['owner', 'supervisor', 'worker', 'packer']], ['cutting', 'تشغيلات الجزارة', 'knife', ['owner', 'supervisor', 'storekeeper', 'accountant']], ['stock', 'المخزون والدفعات', 'box', ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales']]]],
   ['المشتريات', [['purchases', 'الاستلام والمشتريات', 'truck', ['owner', 'storekeeper', 'accountant']], ['suppliers', 'الموردين', 'users', ['owner', 'storekeeper', 'accountant']]]],
-  ['المبيعات', [['orders', 'طلبات واتساب', 'send', ['owner', 'sales', 'accountant']], ['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
-  ['الحسابات', [['treasury', 'الخزنة والبنوك', 'cash', ['owner', 'accountant']], ['expenses', 'المصروفات والإهلاك', 'receipt', ['owner', 'accountant']], ['journal', 'القيود اليومية', 'book', ['owner', 'accountant']], ['coa', 'دليل الحسابات', 'tree', ['owner', 'accountant']], ['reports', 'القوائم المالية', 'chart', ['owner', 'accountant']], ['opening', 'أرصدة البداية', 'book', ['owner', 'accountant']]]],
-  ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
+  ['المبيعات', [['orders', 'طلبات واتساب', 'send', ['owner', 'sales', 'accountant']], ['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['products', 'المنتجات', 'box', ['owner', 'storekeeper', 'supervisor', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
+  ['الحسابات', [['treasury', 'الخزنة والبنوك', 'cash', ['owner', 'accountant']], ['staff', 'السلف والعهد', 'users', ['owner', 'accountant']], ['expenses', 'المصروفات والإهلاك', 'receipt', ['owner', 'accountant']], ['journal', 'القيود اليومية', 'book', ['owner', 'accountant']], ['coa', 'دليل الحسابات', 'tree', ['owner', 'accountant']], ['reports', 'القوائم المالية', 'chart', ['owner']], ['opening', 'أرصدة البداية', 'book', ['owner', 'accountant']]]],
+  ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['access', 'الشاشات لكل دور', 'lock', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
 const ACCESS = {}; NAV.forEach(([, items]) => items.forEach(([id, t, , roles]) => { ACCESS[id] = { t, roles }; }));
-const DETAIL_PARENT = { order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
+const DETAIL_PARENT = { butchery: 'cutting', order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
 const QUICK = [
   ['b-new', 'تشغيلة جديدة', 'افتح تشغيلة برقم', 'batch', ['owner', 'supervisor']],
   ['go:worker', 'صرف خامات', 'من التابلت على تشغيلة', 'hand', ['owner', 'supervisor', 'worker']],
   ['po-new', 'استلام بضاعة', 'من مورد بالباركود', 'truck', ['owner', 'storekeeper']],
-  ['cut-new', 'عملية تقطيع', 'دفعة بالعضم لقطعيات', 'knife', ['owner', 'supervisor', 'storekeeper']],
+  ['bu-new', 'تشغيلة جزارة', 'عجل: الداخل والناتج والفقد', 'knife', ['owner', 'supervisor', 'storekeeper']],
   ['go:newinvoice', 'بيع جديد', 'أوردر من المصنع أو التليفون', 'bill', ['owner', 'sales', 'accountant']],
   ['rc-pick', 'تحصيل', 'فلوس من عميل', 'cash', ['owner', 'accountant', 'sales']],
   ['ex-new', 'مصروف', 'كهربا، مرتبات، إيجار', 'receipt', ['owner', 'accountant']],
 ];
 const BNAV = {
   owner: [['home', 'الرئيسية', 'home'], ['batches', 'التشغيلات', 'batch'], ['stock', 'المخزون', 'box'], ['invoices', 'الفواتير', 'bill']],
-  accountant: [['home', 'الرئيسية', 'home'], ['invoices', 'الفواتير', 'bill'], ['treasury', 'الخزنة', 'cash'], ['reports', 'القوائم', 'chart']],
+  accountant: [['home', 'الرئيسية', 'home'], ['invoices', 'الفواتير', 'bill'], ['treasury', 'الخزنة', 'cash'], ['journal', 'القيود', 'book']],
   storekeeper: [['home', 'الرئيسية', 'home'], ['stock', 'المخزون', 'box'], ['purchases', 'الاستلام', 'truck'], ['suppliers', 'الموردين', 'users']],
   supervisor: [['home', 'الرئيسية', 'home'], ['batches', 'التشغيلات', 'batch'], ['worker', 'الصرف', 'hand'], ['stock', 'المخزون', 'box']],
   sales: [['home', 'الرئيسية', 'home'], ['newinvoice', 'بيع جديد', 'plus'], ['invoices', 'الفواتير', 'bill'], ['customers', 'العملاء', 'users']],
   worker: [],
+  packer: [],
 };
 function renderBnav() {
   const items = BNAV[role()] || [];
@@ -123,8 +124,11 @@ function renderBnav() {
 }
 function quickFor() { return QUICK.filter(q => q[4].includes(role())); }
 function runQuick(key) { if (key.startsWith('go:')) go(key.slice(3)); else if (ACTS[key]) ACTS[key](); }
-function allowed(page) { const base = DETAIL_PARENT[page] || page; const a = ACCESS[base]; return a && a.roles.includes(role()); }
-function homeFor() { return role() === 'worker' ? 'worker' : 'home'; }
+// screens per role: the defaults above, or what the owner set in «الشاشات لكل دور» (the owner always sees everything; the engine still guards every operation)
+const LOCKED = new Set(['users', 'access', 'settings']); // owner-only, never handed out
+function rolesFor(id, def) { const a = (S() && S().settings && S().settings.access) || {}; return role() === 'owner' || LOCKED.has(id) || !a[id] ? def : ['owner', ...a[id]]; }
+function allowed(page) { const base = DETAIL_PARENT[page] || page; const a = ACCESS[base]; return a && rolesFor(base, a.roles).includes(role()); }
+function homeFor() { return ['worker', 'packer'].includes(role()) ? 'worker' : 'home'; }
 
 /* ---------- router ---------- */
 let route = { page: 'home', id: null }, lastKey = '';
@@ -142,7 +146,7 @@ function renderSide() {
   const cur = DETAIL_PARENT[route.page] || route.page;
   let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div><nav class="side-nav" aria-label="الشاشات">`;
   for (const [g, items] of NAV) {
-    const vis = items.filter(([id, , , roles]) => roles.includes(role()));
+    const vis = items.filter(([id, , , roles]) => rolesFor(id, roles).includes(role()));
     if (!vis.length) continue;
     if (g) h += `<div class="nav-g">${g}</div>`;
     for (const [id, t, icon] of vis) h += `<button class="nav ${cur === id ? 'on' : ''}" data-go="${id}">${ic(icon)}<span>${t}</span>${badge[id] ? `<span class="b">${badge[id]}</span>` : ''}${id === 'batches' && pend && isOwner() ? `<span class="b" style="background:#fff;color:var(--red);margin-inline-start:4px" title="طلبات تصحيح مستنية موافقة">${pend}</span>` : ''}</button>`;
@@ -191,7 +195,7 @@ function page(title, html, { crumb, tools } = {}) { renderTop(title, crumb, tool
 /* ---------- Excel export ---------- */
 const NO_XLSX = new Set(['worker', 'order', 'invoice', 'newinvoice', 'opening', 'settings', 'flow', 'home']);
 function addExcelButton() {
-  if (NO_XLSX.has(route.page) || role() === 'worker' || !content().querySelector('table.t')) return;
+  if (NO_XLSX.has(route.page) || ['worker', 'packer'].includes(role()) || !content().querySelector('table.t')) return;
   const tools = document.querySelector('#top .tools'); if (!tools || tools.querySelector('[data-act="xlsx"]')) return;
   tools.insertAdjacentHTML('afterbegin', `<button class="btn no-print" data-act="xlsx" aria-label="تنزيل Excel">${ic('download')}<span class="lbl">Excel</span></button>`);
 }
@@ -217,6 +221,24 @@ function tableRows(table) {
   });
   return rows;
 }
+// a "الإجمالي" row under every exported table that has none: sums money/weight columns,
+// skips prices, rates, dates and columns that mix kg with pieces; a statement gets its closing balance
+const NO_SUM = /سعر|%|٪|نسبة|هامش|تاريخ|التاريخ|رقم|الرقم|الكود|متوسط|الوقت|صلاحية|إنتاج|التليفون|الحد الأدنى|تكلفة الكيلو/;
+function addTotals(tb, rows) {
+  if (tb.querySelector('tr.tot') || rows.length < 3) return rows;
+  const head = rows[0], body = rows.slice(1), stmt = head.includes('مدين') && head.includes('دائن');
+  const trs = [...tb.querySelectorAll(':scope > tbody > tr')];
+  const mixed = i => { const t = trs.map(tr => (tr.children[i] || {}).innerText || '').join(' '); return /كجم|kg/.test(t) && /قطعة|pcs/.test(t); };
+  const tot = head.map((h, i) => {
+    if (i === 0) return 'الإجمالي';
+    const nums = body.map(r => r[i]).filter(v => typeof v === 'number');
+    if (!nums.length || nums.length < body.filter(r => r[i] !== '').length) return '';
+    if (/رصيد/.test(h)) return stmt ? body[body.length - 1][i] : (mixed(i) ? '' : Math.round(nums.reduce((a, b) => a + b, 0) * 1000) / 1000);
+    if (NO_SUM.test(h) || mixed(i)) return '';
+    return Math.round(nums.reduce((a, b) => a + b, 0) * 1000) / 1000;
+  });
+  return tot.slice(1).some(v => v !== '') ? [...rows, tot] : rows;
+}
 function sheetName(raw, used) {
   let n = String(raw || 'Sheet').replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 28) || 'Sheet';
   let k = 2, base = n; while (used.has(n)) n = `${base.slice(0, 25)} ${k++}`; used.add(n); return n;
@@ -233,7 +255,7 @@ async function exportExcel() {
     } else {
       content().querySelectorAll('table.t').forEach(tb => {
         if (tb.parentElement.closest('table')) return; // nested
-        const rows = tableRows(tb); if (rows.length < 2) return;
+        let rows = tableRows(tb); if (rows.length < 2) return; rows = addTotals(tb, rows);
         const card = tb.closest('.card'); const h = card && card.querySelector('.hd h3');
         const ws = X.utils.aoa_to_sheet(rows); ws['!cols'] = rows[0].map((_, i) => ({ wch: Math.min(48, Math.max(10, ...rows.map(r => String(r[i] ?? '').length + 2))) }));
         X.utils.book_append_sheet(wb, ws, sheetName(h ? h.innerText : title, used));
@@ -335,7 +357,7 @@ function findIndex() {
   if (can('batches')) s.docs.batches.slice(-150).reverse().forEach(b => add('التشغيلات', 'batch', b.no, `${E.item(b.productId).name} · ${b.status === 'open' ? 'جارية' : 'مقفولة'} · ${df(b.date)}`, 'batch/' + b.id));
   if (can('invoices')) s.docs.invoices.slice(-300).reverse().forEach(v => add('الفواتير', 'bill', v.no, `${E.partner(v.customerId).name} · ${fm0(v.total)} ج · ${df(v.date)}`, 'invoice/' + v.id));
   if (can('purchases')) s.docs.purchases.slice(-150).reverse().forEach(x => add('المشتريات', 'receipt', x.no, `${E.partner(x.supplierId).name} · ${fm0(x.total)} ج · ${df(x.date)}${x.ref ? ' · ' + x.ref : ''}`, 'purchase/' + x.id, [x.ref]));
-  NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (roles.includes(role())) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
+  NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (rolesFor(id, roles).includes(role())) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
   return out;
 }
 let FIND = { idx: [], res: [], sel: 0 };
@@ -577,11 +599,27 @@ function table(key, cols, rows, { onRow, empty = 'مفيش بيانات', foot }
 ACTS.more = k => { LIMIT[k] = (LIMIT[k] || 60) + 100; render(); };
 
 /* ---------- shared bits ---------- */
-const statusPill = st => ({ open: '<span class="pill warn">جارية</span>', closed: '<span class="pill ok">مقفولة</span>', pending: '<span class="pill warn">مستني موافقة</span>', approved: '<span class="pill ok">اتوافق عليه</span>', rejected: '<span class="pill bad">مرفوض</span>' })[st] || st;
+const statusPill = st => ({ open: '<span class="pill warn">جارية</span>', closed: '<span class="pill ok">مقفولة</span>', pending: '<span class="pill warn">مستني موافقة</span>', packing: '<span class="pill info">في التقفيل</span>', approved: '<span class="pill ok">اتوافق عليه</span>', rejected: '<span class="pill bad">مرفوض</span>' })[st] || st;
 function expPill(exp) { const d = E.daysBetween(E.today(), exp); return d < 0 ? `<span class="pill bad">منتهية</span>` : d <= 3 ? `<span class="pill warn">${d} يوم</span>` : `<span class="pill mut">${d} يوم</span>`; }
 function itemOptions(filter, sel) { return S().items.filter(filter).map(i => `<option value="${i.id}" ${i.id === sel ? 'selected' : ''}>${esc(i.name)} · ${esc(i.code)}</option>`).join(''); }
 function partnerOptions(type, sel, filter = () => true) { return S().partners.filter(p => p.type === type && filter(p)).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join(''); }
-const methodOptions = (opts, sel) => opts.map(m => `<option value="${m}" ${m === sel ? 'selected' : ''}>${E.METHOD_NAME[m]}</option>`).join('');
+const methodOptions = (opts, sel) => opts.map(m => `<option value="${m}" ${m === sel ? 'selected' : ''}>${esc(E.methodName(m))}</option>`).join('');
+// money accounts a form may use: in (collect), pay (spend, incl. credit cards), cash (spend, no credit), move (transfers)
+const ownerOnlyAcc = c => role() !== 'owner' && !!E.moneyKind(c) && c !== '1101'; // staff see the sub treasury only
+function moneyAccs(mode) {
+  const own = role() === 'owner';
+  if (!own) return ['1101'];
+  return E.ACCOUNTS.filter(a => E.LEAF.has(a.code) && a.money).filter(a => {
+    const k = a.money, b = E.cashBalance(a.code);
+    if (a.code === '1107' && !own) return false;
+    if (a.code === '1102' && !b) return false; // the old general bank shows only while it still holds money
+    if (mode === 'move') return ['cash', 'bank', 'wallet', 'gateway'].includes(k) && (!['1103', '1104'].includes(a.code) || b);
+    if (['wallet', 'gateway', 'loan'].includes(k)) return false;
+    if (k === 'credit') return mode === 'pay';
+    return true;
+  }).map(a => a.code);
+}
+const moneyOptions = (mode, sel, list) => (list || moneyAccs(mode)).map(c => `<option value="${c}" ${c === sel ? 'selected' : ''}>${esc(accName(c))}${E.moneyKind(c) === 'credit' || E.moneyKind(c) === 'loan' ? '' : ` · ${fm0(E.cashBalance(c))} ج`}</option>`).join('');
 /* avatars: the user's photo, or their initials on a gold disc */
 function avatar(u, cls = 'av') { u = u || {}; return u.avatar ? `<img class="${cls} av-img" src="${esc(u.avatar)}" alt="">` : `<span class="${cls}">${esc(initials(u.name))}</span>`; }
 const userObj = id => S().users.find(x => x.id === id) || { name: E.userName(id) };
@@ -731,7 +769,7 @@ async function bootLive() {
   }).subscribe();
 }
 
-window.UI = { avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
+window.UI = { NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
 // WhatsApp chat button for any phone number on a profile (Egyptian mobiles: 01xxxxxxxxx → 201xxxxxxxxx)
 window.UI.waLink = ph => { const d = String(ph || '').replace(/\D/g, ''); const n = /^01\d{9}$/.test(d) ? '2' + d : /^20?1\d{9}$/.test(d) ? d.replace(/^20?/, '20') : ''; return n ? `<a class="btn wa" href="https://wa.me/${n}" target="_blank" rel="noopener">واتساب</a>` : ''; };
 window.UI.LIVE = LIVE; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;

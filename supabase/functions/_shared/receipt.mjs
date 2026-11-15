@@ -27,7 +27,7 @@ export function receiptSvg(o, company = {}) {
   parts.push(`<rect width="${W}" height="${H}" fill="url(#g)"/>`);
   parts.push(`<rect x="${R - 54}" y="16" width="54" height="54" rx="14" fill="#fff"/><image href="${LOGO}" x="${R - 50}" y="24" width="46" height="38" preserveAspectRatio="xMidYMid meet"/>`);
   T(R - 66, 40, company.name || 'بوم ميت للحوم', { size: 17, w: 700, fill: '#fff', font: 'Readex Pro' });
-  T(R - 66, 60, 'فاتورة ضريبية مبسطة', { size: 12, fill: '#fff' });
+  T(R - 66, 60, inv && inv.vat ? 'فاتورة ضريبية مبسطة' : 'فاتورة', { size: 12, fill: '#fff' }); // no VAT since Nov 2026
   if (fullyPaid) {
     parts.push(`<g transform="rotate(-8 ${L + 46} 44)"><rect x="${L}" y="30" width="92" height="28" rx="10" fill="#ffffff24" stroke="#fff" stroke-width="2"/><path d="M${L + 70} 44 l5 5 l9 -11" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></g>`);
     parts.push(`<text x="${L + 62}" y="50" transform="rotate(-8 ${L + 46} 44)" font-family="Cairo" font-size="15" font-weight="800" fill="#fff" text-anchor="end" direction="rtl">مدفوع</text>`);
@@ -52,7 +52,7 @@ export function receiptSvg(o, company = {}) {
   dashed();
 
   // totals
-  if (inv.net != null) { row('الصافي', money(inv.net)); row(`ضريبة القيمة المضافة \u200F${AR(inv.vatRate || 14)}٪\u200F`, money(inv.vat)); }
+  if (inv.net != null && inv.vat) { row('الصافي', money(inv.net)); row(`ضريبة القيمة المضافة \u200F${AR(inv.vatRate || 14)}٪\u200F`, money(inv.vat)); }
   row('الدفع', o.methodName || '', { rtlValue: true });
   if (!fullyPaid && paid > 0) row('المدفوع', money(paid));
   if (!fullyPaid && due > 0 && (paid > 0 || o.method === 'cash')) row('المطلوب عند الاستلام', money(due));

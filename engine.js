@@ -8,30 +8,71 @@ const STORE_KEY = 'boom-erp-v1';
 const DATA_VERSION = 5;
 
 /* ---------- chart of accounts ---------- */
-const ACCOUNTS = [
+// money: where the account can pay or receive (cash box, bank, wallet, credit card, loan). sys: the workflow depends on it (never deleted)
+const BASE_ACCOUNTS = [
   ['1', 'الأصول', null], ['11', 'الأصول الثابتة', '1'],
   ['1501', 'آلات ومعدات الإنتاج', '11'], ['1502', 'معدات التبريد والتجميد', '11'], ['1503', 'السيارات', '11'], ['1504', 'أجهزة وأثاث', '11'],
   ['1599', 'مجمع الإهلاك', '11'],
   ['12', 'الأصول المتداولة', '1'],
-  ['1101', 'الخزنة', '12'], ['1102', 'البنك', '12'], ['1103', 'حساب إنستاباي', '12'], ['1201', 'العملاء', '12'],
+  ['1107', 'الخزنة الرئيسية (المالك)', '12', 'cash'], ['1101', 'الخزنة الفرعية (المحاسب)', '12', 'cash'],
+  ['1111', 'بنك CIB', '12', 'bank'], ['1112', 'البنك الأهلي المصري', '12', 'bank'], ['1113', 'بنك مصر ١', '12', 'bank'], ['1114', 'بنك مصر ٢', '12', 'bank'], ['1115', 'بنك مصر ٣', '12', 'bank'],
+  ['1102', 'البنك (حساب قديم)', '12', 'bank'], ['1106', 'فودافون كاش', '12', 'wallet'], ['1103', 'حساب إنستاباي (طلبات واتساب)', '12', 'wallet'], ['1104', 'حساب Paymob (فيزا أونلاين)', '12', 'gateway'],
+  ['1201', 'العملاء', '12'], ['1202', 'سلف العاملين', '12'], ['1203', 'عهد مع السواقين والمندوبين', '12'],
   ['1301', 'مخزون خامات اللحوم', '12'], ['1302', 'مخزون التوابل والإضافات', '12'], ['1303', 'مخزون مواد التعبئة', '12'],
   ['1304', 'إنتاج تحت التشغيل', '12'], ['1305', 'مخزون المنتج التام', '12'], ['1401', 'ضريبة القيمة المضافة على المشتريات', '12'],
   ['2', 'الخصوم', null], ['21', 'الخصوم المتداولة', '2'], ['2101', 'الموردين', '21'], ['2102', 'ضريبة القيمة المضافة على المبيعات', '21'],
-  ['3', 'حقوق الملكية', null], ['3101', 'رأس المال', '3'], ['3201', 'الأرباح المحتجزة', '3'],
-  ['4', 'الإيرادات', null], ['4101', 'مبيعات قطاعي (أفراد)', '4'], ['4102', 'مبيعات جملة (مطاعم ومحلات)', '4'], ['4103', 'إيراد التوصيل', '4'],
+  ['2111', 'كريدت ١', '21', 'credit'], ['2112', 'كريدت ٢', '21', 'credit'], ['2113', 'كريدت ٣', '21', 'credit'], ['2114', 'كريدت ٤', '21', 'credit'],
+  ['22', 'القروض', '2'], ['2201', 'قرض البنك الأهلي ١', '22', 'loan'], ['2202', 'قرض البنك الأهلي ٢', '22', 'loan'], ['2203', 'قرض البنك الأهلي ٣', '22', 'loan'], ['2204', 'قرض البنك الأهلي ٤', '22', 'loan'],
+  ['3', 'حقوق الملكية', null], ['3101', 'رأس المال', '3'], ['3201', 'الأرباح المحتجزة', '3'], ['3301', 'جاري الشركاء', '3'],
+  ['4', 'الإيرادات', null], ['4101', 'مبيعات قطاعي (أفراد)', '4'], ['4102', 'مبيعات جملة (مطاعم ومحلات)', '4'], ['4103', 'إيراد التوصيل', '4'], ['4104', 'إيرادات أخرى', '4'],
   ['5', 'التكاليف والمصروفات', null], ['51', 'تكلفة المبيعات', '5'], ['5101', 'تكلفة البضاعة المباعة', '51'],
   ['52', 'مصروفات المصنع', '5'], ['5102', 'هالك وتالف المخزون', '52'], ['5201', 'أجور الإنتاج', '52'], ['5202', 'كهرباء ومياه المصنع', '52'], ['5203', 'صيانة', '52'],
   ['53', 'مصروفات البيع والتسويق', '5'], ['5301', 'تسويق وإعلانات', '53'], ['5302', 'نقل وتوصيل', '53'],
   ['54', 'مصروفات إدارية وعمومية', '5'], ['5401', 'إيجار', '54'], ['5402', 'مرتبات إدارية', '54'], ['5403', 'مصروفات عمومية', '54'],
   ['5501', 'الإهلاك', '54'],
-].map(([code, name, parent]) => ({ code, name, parent }));
-const LEAF = new Set(ACCOUNTS.filter(a => !ACCOUNTS.some(b => b.parent === a.code)).map(a => a.code));
+  ['56', 'مصروفات تمويلية وبنكية', '5'], ['5601', 'فوائد وتكلفة القروض', '56'], ['5602', 'عمولات ومصاريف بنكية', '56'],
+].map(([code, name, parent, money]) => ({ code, name, parent, sys: true, ...(money ? { money } : {}) }));
+// the live chart = the base + what the owner added/renamed (S.coa); rebuilt in place so every module sees the same arrays
+const ACCOUNTS = [];
+const LEAF = new Set();
+const EXPENSE_ACCS = [];
+const AUTO_EXP = new Set(['5101', '5102', '5501']); // booked by the system only (cost of sales, write-offs, depreciation)
+function applyCoa(coa) {
+  coa = coa || {};
+  ACCOUNTS.length = 0;
+  for (const a of BASE_ACCOUNTS) ACCOUNTS.push({ ...a, name: (coa.names && coa.names[a.code]) || a.name });
+  for (const a of coa.added || []) ACCOUNTS.push({ ...a, sys: false });
+  LEAF.clear(); ACCOUNTS.filter(a => !ACCOUNTS.some(b => b.parent === a.code)).forEach(a => LEAF.add(a.code));
+  EXPENSE_ACCS.length = 0; [...LEAF].filter(c => c[0] === '5' && !AUTO_EXP.has(c)).sort().forEach(c => EXPENSE_ACCS.push(c));
+}
+applyCoa();
+const accOf = code => ACCOUNTS.find(a => a.code === code);
+const accLabel = code => (accOf(code) || {}).name || code;
+const moneyKind = code => (accOf(code) || {}).money || null;
 const accType = code => ({ 1: 'asset', 2: 'liability', 3: 'equity', 4: 'income', 5: 'expense' })[code[0]];
 const debitNature = code => code[0] === '1' || code[0] === '5';
 const CAT_ACC = { carcass: '1301', meat: '1301', byproduct: '1301', spice: '1302', pack: '1303', product: '1305' };
 const CAT_NAME = { carcass: 'لحوم بالعضم', meat: 'قطعيات ولحوم', byproduct: 'نواتج تقطيع', spice: 'توابل وإضافات', pack: 'مواد تعبئة', product: 'منتج تام' };
-const METHOD_ACC = { cash: '1101', bank: '1102', instapay: '1103' };
-const METHOD_NAME = { cash: 'كاش', bank: 'تحويل بنكي', instapay: 'إنستاباي', credit: 'آجل' };
+const METHOD_ACC = { cash: '1101', main: '1107', bank: '1102', instapay: '1103', card: '1104', vodafone: '1106' };
+const METHOD_NAME = { cash: 'كاش', main: 'الخزنة الرئيسية', bank: 'تحويل بنكي', instapay: 'إنستاباي', card: 'فيزا (Paymob)', vodafone: 'فودافون كاش', credit: 'آجل' };
+// a method is a fixed key above, or the code of any money account (a bank, a credit card…)
+const methodAcc = m => METHOD_ACC[m] || (moneyKind(m) && LEAF.has(m) ? m : null);
+const methodName = m => METHOD_NAME[m] || accLabel(m);
+const payLabel = m => METHOD_NAME[m] || ({ cash: 'كاش', bank: 'تحويل بنكي', wallet: 'محفظة', credit: 'كريدت' })[moneyKind(m)] || accLabel(m); // what the customer reads (never our internal account names)
+const isOut = acc => ['cash', 'bank', 'wallet', 'gateway'].includes(moneyKind(acc)); // real money we hold (must not go negative)
+// everyone but the owner works from the sub treasury only (owner's rule, Nov 2026); WhatsApp order money keeps its own route
+const STAFF_ACC = '1101';
+let orderMoney = false;
+function staffOnly(acc) { if (!seeding && !orderMoney && !cardReceipt && me().role !== 'owner') need(acc === STAFF_ACC, `${accLabel(acc)} للمالك بس. المحاسب بيشتغل من الخزنة الفرعية بس`); }
+function useAcc(acc, { pay = false } = {}) { // who may move money through this account
+  need(acc, 'اختار الحساب'); staffOnly(acc);
+  if (acc === '1107') need(me().role === 'owner', 'الخزنة الرئيسية للمالك بس');
+  if (acc === '1106') fail('فودافون كاش للتحويل الداخلي بس (من وإلى الخزنة)');
+  const k = moneyKind(acc); need(k && k !== 'loan', 'الحساب ده مش بيدفع ولا بيقبض');
+  if (k === 'credit') need(pay, 'الكريدت بيتدفع بيه بس، مش بيتحصل عليه');
+  return acc;
+}
+const enough = (acc, amount) => { if (isOut(acc)) need(cashBalance(acc) >= amount, `رصيد ${accLabel(acc)} مش كفاية`); };
 // store kinds: receiving (goods in), raw (production chillers: meat & spices), pack (packaging), fg (finished-goods freezers)
 const WH_USE = { receiving: 'مخزن استلام', raw: 'تلاجة إنتاج (خامات)', pack: 'مخزن تعبئة', fg: 'فريزر منتج تام' };
 const WAREHOUSES = [
@@ -39,8 +80,10 @@ const WAREHOUSES = [
   { id: 'W3', name: 'مخزن التعبئة والتغليف', use: 'pack' }, { id: 'W4', name: 'فريزر المنتج التام ١', use: 'fg' },
   { id: 'W5', name: 'تلاجة الإنتاج ٢', use: 'raw' }, { id: 'W6', name: 'فريزر المنتج التام ٢', use: 'fg' },
 ];
-const PACK_SIZES = [500, 1000, 1500, 2000]; // the only pack sizes Boom Meat makes and sells
+const MEAT_SECTIONS = ['بلدي فريش', 'برازيلي', 'دهون']; // worker-screen sections; the owner can add more from the item form
+const PACK_SIZES = [200, 250, 500, 1000]; // standard packs (Nov 2026: 1.5 kg and 2 kg dropped); any other weight is an «open weight» tray
 const packsOf = p => (p.packs && p.packs.length ? p.packs : PACK_SIZES);
+const isOpenWeight = g => isInt(g) && g >= 50 && g <= 20000 && !PACK_SIZES.includes(g);
 const ROLES = {
   owner: { name: 'المالك (أدمن)', cost: true },
   accountant: { name: 'محاسب', cost: true },
@@ -48,6 +91,7 @@ const ROLES = {
   supervisor: { name: 'مشرف إنتاج', cost: false },
   worker: { name: 'عامل إنتاج', cost: false },
   sales: { name: 'مبيعات', cost: false },
+  packer: { name: 'عامل تقفيل (جاف)', cost: false },
   pending: { name: 'مستني صلاحيات', cost: false },
 };
 
@@ -92,21 +136,23 @@ let S = null;
 let seeding = false, seedClock = 0, seedDay = null;
 
 function freshState() {
+  applyCoa();
   return {
+    coa: { added: [], names: {} }, staff: [],
     version: DATA_VERSION, mode: 'demo', warehouses: JSON.parse(JSON.stringify(WAREHOUSES)), seq: {}, createdAt: new Date().toISOString(),
     settings: {
-      vatRate: 14, issueLimitKg: 100, fgShelfDays: 90, deliveryFee: 10000, telegram: true, tgToken: '', tgChat: '',
+      vatRate: 0, issueLimitKg: 100, fgShelfDays: 90, deliveryFee: 10000, telegram: true, tgToken: '', tgChat: '',
       company: { name: 'بوم ميت للحوم', nameEn: 'Boom Meat', address: 'المنطقة الصناعية · مدينة ١٥ مايو · القاهرة', phone: '(+2) 01033004411', taxId: '000-000-000' },
     },
     users: [
       { id: 'u1', name: 'المالك', role: 'owner' }, { id: 'u2', name: 'محمد سالم', role: 'accountant' },
       { id: 'u3', name: 'خالد عبد الله', role: 'storekeeper' }, { id: 'u4', name: 'أحمد فتحي', role: 'supervisor' },
-      { id: 'u5', name: 'محمود حسن', role: 'worker' }, { id: 'u6', name: 'سارة يوسف', role: 'sales' },
+      { id: 'u5', name: 'محمود حسن', role: 'worker' }, { id: 'u6', name: 'سارة يوسف', role: 'sales' }, { id: 'u7', name: 'حسن علي', role: 'packer' },
     ],
     currentUser: 'u1',
     items: [], partners: [], lots: [], journal: [], audit: [], alerts: [], priceHistory: [], flags: { low: {}, exp: {} },
     assets: [],
-    docs: { purchases: [], transfers: [], cuttings: [], batches: [], invoices: [], receipts: [], payments: [], expenses: [], cash: [], corrections: [], depreciation: [], writeoffs: [], orders: [] },
+    docs: { purchases: [], transfers: [], cuttings: [], butcheries: [], batches: [], invoices: [], receipts: [], payments: [], expenses: [], cash: [], corrections: [], depreciation: [], writeoffs: [], orders: [], deposits: [], advances: [], custody: [], liabPays: [] },
   };
 }
 
@@ -125,9 +171,23 @@ const warehouses = () => (S && S.warehouses) || WAREHOUSES;
 const whName = id => (warehouses().find(w => w.id === id) || {}).name || id;
 const whUse = id => (warehouses().find(w => w.id === id) || {}).use;
 const whs = use => warehouses().filter(w => w.use === use).map(w => w.id);
+function migratePacks(st) { // Nov 2026, once: products sell 200 g / 250 g / ½ / 1 kg; bags for 200 g & 250 g and the rework item exist
+  if (!st.items || (st.migr && st.migr.packs2026)) return;
+  st.migr = { ...(st.migr || {}), packs2026: true };
+  for (const it of st.items) if (it.cat === 'product' && it.packs && it.packs.some(g => g === 1500 || g === 2000)) // only products that had 1.5/2 kg: those go, 200 g & 250 g come; every other size stays (e.g. 2.5 kg)
+    it.packs = [...new Set([200, 250, ...it.packs.filter(g => g !== 1500 && g !== 2000)])].sort((a, b) => a - b);
+  const nextCode = pre => `${pre}-${Math.max(0, ...st.items.filter(i => i.code.startsWith(pre + '-')).map(i => parseInt(i.code.slice(3), 10) || 0)) + 1}`;
+  for (const [g, name] of [[200, 'كيس فاكيوم ٢٠٠ جرام'], [250, 'كيس فاكيوم ٢٥٠ جرام']]) if (!st.items.some(i => i.cat === 'pack' && i.packFor === g)) st.items.push({ id: 'it_bag' + g, code: nextCode('PK'), name, cat: 'pack', unit: 'pc', priceRetail: 0, priceWholesale: 0, minQty: 300, vat: 0, active: true, packFor: g });
+  if (!st.items.some(i => i.rework)) st.items.push({ id: 'it_rework', code: nextCode('RM'), name: 'إعادة تصنيع (عجينة برجر)', cat: 'meat', unit: 'kg', priceRetail: 0, priceWholesale: 0, minQty: 0, vat: 0, active: true, rework: true, sub: 'إعادة تصنيع' });
+}
 function ensureWarehouses(st) { // books saved before stores became configurable
   if (!st.warehouses) st.warehouses = JSON.parse(JSON.stringify(WAREHOUSES));
   for (const w of st.warehouses) if (!w.use) w.use = (WAREHOUSES.find(x => x.id === w.id) || {}).use || 'raw';
+  st.coa = st.coa || { added: [], names: {} }; applyCoa(st.coa);
+  st.staff = st.staff || [];
+  migratePacks(st);
+  for (const k of ['deposits', 'advances', 'custody', 'liabPays', 'butcheries']) if (st.docs && !st.docs[k]) st.docs[k] = [];
+  if (st.settings) st.settings.vatRate = 0; // Boom Meat sells and buys without VAT (owner's decision, Nov 2026); old invoices keep the VAT they were booked with
   return st;
 }
 
@@ -191,7 +251,7 @@ function tx(fn) {
   const snap = JSON.stringify(S);
   try { const r = fn(); watch(today()); save(); return r; }
   catch (e) {
-    S = JSON.parse(snap);
+    S = JSON.parse(snap); applyCoa(S.coa); // the chart may have changed inside the failed operation
     if (e && (e.refused || /[\u0600-\u06FF]/.test(e.message || ''))) throw e; // our own Arabic messages pass through
     // anything else is malformed input hitting the code (wrong type, missing field): refuse it in plain words, keep the cause for the log
     const friendly = new Error('البيانات المبعوتة ناقصة أو مش مظبوطة. راجع الخانات وجرّب تاني'); friendly.refused = true; friendly.cause = e; throw friendly;
@@ -233,7 +293,7 @@ function purchase({ date, supplierId, ref, lines, wh }) {
       need(ln.expDate && ln.expDate > date, `تاريخ صلاحية "${it.name}" لازم يكون بعد تاريخ الاستلام`);
       const value = mulDiv(ln.qty, ln.unitCost, unitBase(it.unit));
       need(value > 0 && value <= 1e12, `قيمة "${it.name}" مش منطقية. راجع الكمية والسعر`);
-      const vat = Math.round(value * it.vat / 100);
+      const vat = 0; // no VAT on purchases
       const lot = newLot({ itemId: it.id, wh, qty: ln.qty, value, inDate: date, prodDate: ln.prodDate || date, expDate: ln.expDate, src: { type: 'purchase', id: doc.id, no } });
       doc.lines.push({ itemId: it.id, qty: ln.qty, unitCost: ln.unitCost, value, vat, lotId: lot.id, lotCode: lot.code, prodDate: lot.prodDate, expDate: lot.expDate });
       doc.net += value; doc.vat += vat;
@@ -298,6 +358,113 @@ function cutting({ date, lotId, qty, outputs }) {
   });
 }
 
+/* ---------- butchery runs (تشغيلة جزارة): like a production batch, for whole calves ----------
+   open with the calf (carcass lot) → add bags used → record every output line (meat, fat, bone… by kg or by packs)
+   → close: inputs + bags cost is spread on the outputs by sale value (bone and other by-products carry 0), loss = in − out */
+const butcheries = () => S.docs.butcheries || (S.docs.butcheries = []);
+const butById = id => { const r = butcheries().find(x => x.id === id); need(r, 'تشغيلة الجزارة غير موجودة'); return r; };
+const butIn = r => r.inputs.reduce((s, i) => s + i.qty, 0);
+const butOut = r => r.outputs.reduce((s, o) => s + o.qty, 0);
+const butCost = r => r.inputs.reduce((s, i) => s + i.value, 0) + r.packs.reduce((s, p) => s + p.value, 0);
+function takeCarcass(r, lotId, qty, date) {
+  const l = S.lots.find(x => x.id === lotId); need(l && l.qty > 0, 'الدفعة غير موجودة');
+  const src = item(l.itemId); need(src.cat === 'carcass', 'تشغيلة الجزارة بتاخد لحم بالعضم (عجل/ربع)');
+  need(isInt(qty) && qty > 0 && qty <= l.qty, `الكمية أكبر من رصيد الدفعة (${fmtQty(l.qty, 'kg')})`);
+  const part = takeFromLot(l, qty);
+  const je = post({ date, type: 'butchery', ref: { type: 'butchery', id: r.id, no: r.no }, memo: `دخول ${src.name} ${fmtQty(qty, 'kg')} (دفعة ${l.code}) على تشغيلة الجزارة ${r.no}`, lines: [{ acc: '1304', dr: part.value }, { acc: CAT_ACC.carcass, cr: part.value }] });
+  r.inputs.push({ id: uid('BI'), lotId: l.id, code: l.code, itemId: l.itemId, qty, value: part.value, wh: l.wh, expDate: l.expDate, je: je.no, at: stamp(date), by: S.currentUser });
+}
+function openButchery({ date, lotId, qty, note }) {
+  return tx(() => {
+    perm('supervisor', 'storekeeper'); checkDate(date);
+    const no = nextNo('BU');
+    const r = { id: uid('BU'), no, date, status: 'open', note: String(note || '').slice(0, 200), inputs: [], packs: [], outputs: [], by: S.currentUser, at: stamp(date) };
+    takeCarcass(r, lotId, qty, date);
+    butcheries().push(r);
+    audit('butchery_open', no, `فتح تشغيلة جزارة ${no}: ${item(r.inputs[0].itemId).name} ${fmtQty(qty, 'kg')}`, date);
+    return r;
+  });
+}
+function butcheryInput({ id, lotId, qty, date }) { // another calf / quarter into the same run
+  return tx(() => {
+    perm('supervisor', 'storekeeper'); date = date || today(); checkDate(date);
+    const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة'); need(date >= r.date, 'التاريخ قبل فتح التشغيلة');
+    takeCarcass(r, lotId, qty, date);
+    audit('butchery_in', r.no, `إضافة ${fmtQty(qty, 'kg')} على ${r.no}`, date);
+    return r;
+  });
+}
+function butcheryPack({ id, itemId, qty, date }) { // bags/trays used in the run: their cost goes into the cuts
+  return tx(() => {
+    perm('supervisor', 'storekeeper'); date = date || today(); checkDate(date);
+    const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة');
+    const it = item(itemId); need(it.cat === 'pack', 'اختار كيس أو مادة تعبئة');
+    need(isInt(qty) && qty > 0, 'العدد غير صحيح');
+    const parts = consume(it.id, qty, whs('pack'));
+    const value = parts.reduce((s, p) => s + p.value, 0);
+    const je = post({ date, type: 'butchery', ref: { type: 'butchery', id: r.id, no: r.no }, memo: `صرف ${it.name} على تشغيلة الجزارة ${r.no}`, lines: [{ acc: '1304', dr: value }, { acc: CAT_ACC.pack, cr: value }] });
+    r.packs.push({ id: uid('BP'), itemId: it.id, qty, value, parts, je: je.no, at: stamp(date), by: S.currentUser });
+    audit('butchery_pack', r.no, `صرف ${fmtQty(qty, 'pc')} ${it.name} على ${r.no}`, date);
+    return r;
+  });
+}
+function butcheryOutput({ id, itemId, qty, count, packSize, note }) { // one line of the output sheet (no stock move until close)
+  return tx(() => {
+    perm('supervisor', 'storekeeper');
+    const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة');
+    const it = item(itemId); need(it.cat === 'meat' || it.cat === 'byproduct', `"${it.name}" مش ناتج جزارة`);
+    if (count != null && count !== '' && count !== 0) { need(isInt(count) && count > 0 && isInt(packSize) && packSize >= 50 && packSize <= 20000, 'اكتب العدد ووزن الحتة'); qty = count * packSize; } else { count = null; packSize = null; }
+    need(isInt(qty) && qty > 0, 'اكتب الوزن');
+    need(butOut(r) + qty <= butIn(r), `الناتج هيبقى أكبر من الداخل (${fmtQty(butIn(r), 'kg')})`);
+    const ln = { id: uid('BO'), itemId: it.id, qty, count, packSize, note: String(note || '').slice(0, 100), by: S.currentUser, at: stamp(today()) };
+    r.outputs.push(ln);
+    return ln;
+  });
+}
+function butcheryDropOutput({ id, lineId }) {
+  return tx(() => {
+    perm('supervisor', 'storekeeper');
+    const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة');
+    const k = r.outputs.findIndex(o => o.id === lineId); need(k >= 0, 'السطر غير موجود');
+    r.outputs.splice(k, 1); return r;
+  });
+}
+function newCutItem({ name, cat, sub, priceRetail }) { // the floor adds a new cut/by-product without waiting for the owner
+  return tx(() => {
+    perm('supervisor', 'storekeeper');
+    name = String(name || '').trim().slice(0, 60); need(name.length >= 2, 'اكتب اسم الصنف');
+    need(!S.items.some(i => i.name === name), 'فيه صنف بنفس الاسم');
+    need(cat === 'meat' || cat === 'byproduct', 'اختار: قطعية ولا ناتج (عضم، دهن…)');
+    need(isInt(priceRetail || 0) && (priceRetail || 0) >= 0, 'السعر غير صحيح');
+    if (cat === 'meat') need(priceRetail > 0, 'القطعية محتاجة سعر بيع للكيلو عشان التكلفة تتوزع صح');
+    const used = S.items.filter(i => i.code.startsWith('RM-')).map(i => parseInt(i.code.slice(3), 10) || 0);
+    const it = { id: uid('IT'), code: `RM-${Math.max(0, ...used) + 1}`, name, cat, unit: 'kg', priceRetail: cat === 'meat' ? priceRetail : 0, priceWholesale: 0, minQty: 0, vat: 0, active: true };
+    const sb = String(sub || '').trim().slice(0, 40); if (sb) it.sub = sb;
+    S.items.push(it);
+    audit('item_add', it.code, `إضافة صنف من تشغيلة الجزارة: ${name}`);
+    return it;
+  });
+}
+function closeButchery({ id, date, wh }) {
+  return tx(() => {
+    perm('supervisor', 'storekeeper'); checkDate(date);
+    const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة بالفعل'); need(date >= r.date, 'تاريخ القفل قبل فتح التشغيلة');
+    need(r.outputs.length, 'سجل الناتج الأول');
+    const inKg = butIn(r), outKg = butOut(r); need(outKg <= inKg, 'الناتج أكبر من الداخل');
+    const dest = wh || r.inputs[0].wh; need(['raw', 'receiving'].includes(whUse(dest)), 'اختار تلاجة إنتاج أو مخزن الاستلام');
+    const cost = butCost(r);
+    const weights = r.outputs.map(o => { const it = item(o.itemId); return it.cat === 'byproduct' ? 0 : mulDiv(o.qty, it.priceRetail, 1000); });
+    need(weights.some(w => w > 0), 'لازم قطعية واحدة على الأقل ليها سعر بيع (العضم والنواتج تكلفتها صفر)');
+    const values = alloc(cost, weights);
+    const exp = r.inputs.map(i => i.expDate).sort()[0];
+    r.outputs.forEach((o, k) => { const lot = newLot({ itemId: o.itemId, wh: dest, qty: o.qty, value: values[k], inDate: date, prodDate: date, expDate: exp, src: { type: 'butchery', id: r.id, no: r.no } }); o.value = values[k]; o.lotCode = lot.code; });
+    r.je = post({ date, type: 'butchery_close', ref: { type: 'butchery', id: r.id, no: r.no }, memo: `قفل تشغيلة الجزارة ${r.no}: ناتج ${fmtQty(outKg, 'kg')} من ${fmtQty(inKg, 'kg')}`, lines: [{ acc: CAT_ACC.meat, dr: cost }, { acc: '1304', cr: cost }] }).no;
+    Object.assign(r, { status: 'closed', inKg, outKg, loss: inKg - outKg, cost, wh: dest, closeDate: date, closedAt: stamp(date), closedBy: S.currentUser });
+    audit('butchery_close', r.no, `قفل ${r.no}: داخل ${fmtQty(inKg, 'kg')}، ناتج ${fmtQty(outKg, 'kg')}، فقد ${fmtQty(inKg - outKg, 'kg')} (${(inKg ? (inKg - outKg) * 100 / inKg : 0).toFixed(1)}٪)`, date);
+    return r;
+  });
+}
+
 function createBatch({ date, productId, planned }) {
   return tx(() => {
     perm('supervisor'); checkDate(date);
@@ -310,6 +477,9 @@ function createBatch({ date, productId, planned }) {
     return b;
   });
 }
+const running = b => b.status === 'open' || b.status === 'packing'; // packing = the meat side is done, the dry (packing) worker adds packaging
+const batchKg = b => b.issues.filter(i => !i.reversed && item(i.itemId).unit === 'kg' && item(i.itemId).cat !== 'pack').reduce((s, i) => s + i.qty, 0) - (b.returns || []).reduce((s, r) => s + r.qty, 0);
+function batchCostNow(b) { return b.issues.filter(i => !i.reversed).reduce((s, i) => s + i.value, 0) - (b.returns || []).reduce((s, r) => s + r.value, 0); }
 const batchById = id => { const b = S.docs.batches.find(x => x.id === id); need(b, 'التشغيلة غير موجودة'); return b; };
 function issuedOf(b, itemId) { return b.issues.filter(i => !i.reversed && i.itemId === itemId).reduce((s, i) => s + i.qty, 0); }
 
@@ -325,10 +495,12 @@ function _issue(b, itemId, qty, date, note) {
 }
 function issue({ batchId, itemId, qty, date }) {
   return tx(() => {
-    perm('worker', 'supervisor'); date = date || today(); checkDate(date);
-    const b = batchById(batchId); need(b.status === 'open', 'التشغيلة مقفولة');
+    perm('worker', 'supervisor', 'packer'); date = date || today(); checkDate(date);
+    const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة');
     need(date >= b.date, 'تاريخ الصرف قبل تاريخ التشغيلة');
-    const it = item(itemId);
+    const it = item(itemId), r = me().role;
+    if (it.cat === 'pack') { need(r !== 'worker', 'مواد التعبئة بيصرفها عامل التقفيل'); need(b.status === 'packing' || r !== 'packer', 'التشغيلة لسه عند عامل اللحوم'); }
+    else { need(r !== 'packer', 'عامل التقفيل بيصرف مواد تعبئة بس'); need(b.status === 'open', 'عامل اللحوم خلّص التشغيلة دي، اتحولت للتقفيل'); }
     const before = issuedOf(b, itemId);
     const ln = _issue(b, itemId, qty, date);
     const lim = S.settings.issueLimitKg * 1000;
@@ -341,7 +513,7 @@ function issue({ batchId, itemId, qty, date }) {
 }
 function requestCorrection({ batchId, issueId, newQty, reason }) {
   return tx(() => {
-    const b = batchById(batchId); need(b.status === 'open', 'التشغيلة مقفولة، التصحيح مش متاح');
+    const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة، التصحيح مش متاح');
     const ln = b.issues.find(i => i.id === issueId); need(ln && !ln.reversed, 'السطر غير موجود');
     need(isInt(newQty) && newQty >= 0 && newQty !== ln.qty, 'اكتب الكمية الصحيحة');
     need(reason && reason.trim().length >= 3, 'اكتب سبب التصحيح');
@@ -361,7 +533,7 @@ function decideCorrection(id, approve) {
     const b = batchById(c.batchId);
     const it = item(c.itemId);
     if (approve) {
-      need(b.status === 'open', 'التشغيلة اتقفلت، ارفض الطلب');
+      need(running(b), 'التشغيلة اتقفلت، ارفض الطلب');
       const ln = b.issues.find(i => i.id === c.issueId);
       restore(ln.parts);
       ln.reversed = true; ln.reversedBy = c.no;
@@ -373,35 +545,62 @@ function decideCorrection(id, approve) {
     return c;
   });
 }
+function finishMeat({ batchId }) { // the meat worker is done: the batch moves to the dry (packing) worker
+  return tx(() => {
+    perm('worker', 'supervisor');
+    const b = batchById(batchId); need(b.status === 'open', 'التشغيلة مش عند عامل اللحوم');
+    need(batchKg(b) > 0, 'مفيش خامات اتصرفت على التشغيلة');
+    b.status = 'packing'; b.meatDoneAt = stamp(today()); b.meatDoneBy = S.currentUser;
+    audit('batch_packing', b.no, `عامل اللحوم خلّص ${b.no}: اتحولت للتقفيل`);
+    alert('info', 'packing', `التشغيلة ${b.no} جاهزة للتقفيل`, { type: 'batch', id: b.id, no: b.no });
+    return b;
+  });
+}
+const reworkItem = () => { const it = S.items.find(i => i.rework); need(it, 'مفيش صنف «إعادة تصنيع» معرّف'); return it; };
+function returnRework({ batchId, qty, date }) { // dough left in the machine goes back to the chiller as «إعادة تصنيع», at its share of the batch cost
+  return tx(() => {
+    perm('supervisor'); date = date || today(); checkDate(date);
+    const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة'); need(date >= b.date, 'التاريخ قبل التشغيلة');
+    const kg = batchKg(b), meatCost = b.issues.filter(i => !i.reversed && item(i.itemId).cat !== 'pack').reduce((s, i) => s + i.value, 0) - (b.returns || []).reduce((s, r) => s + r.value, 0);
+    need(isInt(qty) && qty > 0 && qty < kg, `الكمية لازم تكون أقل من الخامات اللي على التشغيلة (${fmtQty(kg, 'kg')})`);
+    const value = mulDiv(meatCost, qty, kg), it = reworkItem();
+    const exps = b.issues.filter(i => !i.reversed && item(i.itemId).cat !== 'pack').flatMap(i => i.parts.map(p => (S.lots.find(l => l.id === p.lotId) || {}).expDate)).filter(Boolean).sort();
+    const rawW = whs('raw'); need(rawW.length, 'مفيش تلاجة إنتاج');
+    const lot = newLot({ itemId: it.id, wh: rawW[0], qty, value, inDate: date, prodDate: date, expDate: exps[0] && exps[0] > date ? exps[0] : addDays(date, 2), src: { type: 'batch', id: b.id, no: b.no } });
+    const je = post({ date, type: 'rework', ref: { type: 'batch', id: b.id, no: b.no }, memo: `إعادة تصنيع ${fmtQty(qty, 'kg')} من ${b.no} للتلاجة`, lines: [{ acc: CAT_ACC.meat, dr: value }, { acc: '1304', cr: value }] });
+    (b.returns = b.returns || []).push({ id: uid('RW'), qty, value, lotCode: lot.code, je: je.no, at: stamp(date), by: S.currentUser });
+    audit('rework', b.no, `رجوع ${fmtQty(qty, 'kg')} عجينة من ${b.no} كـ«إعادة تصنيع» (${lot.code})`, date);
+    return lot;
+  });
+}
 function bagItemFor(size) { const it = S.items.find(i => i.cat === 'pack' && i.packFor === size); need(it, 'مفيش كيس معرّف للعبوة ' + size / 1000 + ' كجم'); return it; }
 function stickerItem() { const it = S.items.find(i => i.cat === 'pack' && i.sticker); need(it, 'مفيش استيكر معرّف'); return it; }
 
 function closeBatch({ batchId, date, packs, split }) {
   return tx(() => {
     perm('supervisor'); checkDate(date);
-    const b = batchById(batchId); need(b.status === 'open', 'التشغيلة مقفولة بالفعل');
+    const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة بالفعل');
     need(date >= b.date, 'تاريخ القفل قبل تاريخ التشغيلة');
-    const live = b.issues.filter(i => !i.reversed);
-    const inputKg = live.filter(i => item(i.itemId).unit === 'kg' && item(i.itemId).cat !== 'pack').reduce((s, i) => s + i.qty, 0);
+    const inputKg = batchKg(b);
     need(inputKg > 0, 'مفيش خامات اتصرفت على التشغيلة');
+    packs = Object.fromEntries(Object.entries(packs || {}).map(([k, v]) => [parseInt(k, 10), v]).filter(([, v]) => v));
     let output = 0, count = 0;
-    const pSizes = packsOf(item(b.productId));
-    for (const s of PACK_SIZES) { const n = packs[s] || 0; need(isInt(n) && n >= 0, 'عدد عبوات غير صحيح'); if (n) need(pSizes.includes(s), `العبوة ${s / 1000} كجم مش متاحة للمنتج ده`); output += n * s; count += n; }
+    const p = item(b.productId), pSizes = packsOf(p);
+    for (const [g, n] of Object.entries(packs)) { const s = +g; need(isInt(n) && n > 0, 'عدد عبوات غير صحيح'); need(pSizes.includes(s) || isOpenWeight(s), `العبوة ${s} جم مش متاحة للمنتج ده`); output += n * s; count += n; }
     need(count > 0, 'سجل عدد العبوات الناتجة');
     need(output <= inputKg, `الناتج (${fmtQty(output, 'kg')}) أكبر من الخامات المصروفة (${fmtQty(inputKg, 'kg')})`);
     need(!S.docs.corrections.some(c => c.batchId === b.id && c.status === 'pending'), 'فيه طلب تصحيح مستني موافقة على التشغيلة دي');
-    // packaging issued automatically: one bag per pack + one sticker per pack
-    for (const s of PACK_SIZES) if (packs[s]) _issue(b, bagItemFor(s).id, packs[s], date, 'تعبئة تلقائية');
-    _issue(b, stickerItem().id, count, date, 'تعبئة تلقائية');
-    const cost = b.issues.filter(i => !i.reversed).reduce((s, i) => s + i.value, 0);
-    const sizes = PACK_SIZES.filter(s => packs[s]);
+    // packaging: one bag per standard pack (unless the packing worker already issued that bag) + one sticker per pack; open-weight trays are issued by hand
+    const sizes = Object.keys(packs).map(Number).sort((a, c) => a - c);
+    for (const s of sizes) if (PACK_SIZES.includes(s) || OLD_BAG(s)) { const bag = bagItemFor(s); if (!issuedOf(b, bag.id)) _issue(b, bag.id, packs[s], date, 'تعبئة تلقائية'); }
+    if (!issuedOf(b, stickerItem().id)) _issue(b, stickerItem().id, count, date, 'تعبئة تلقائية');
+    const cost = batchCostNow(b);
     const vals = alloc(cost, sizes.map(s => packs[s] * s));
-    const p = item(b.productId);
     // where the packs go: one freezer by default, or split across finished-goods freezers
     const fgW = whs('fg'); need(fgW.length, 'مفيش فريزر منتج تام متعرّف');
-    const dest = (split && split.length ? split : [{ wh: fgW[0], packs }]).map(d => ({ wh: d.wh, packs: d.packs || {} }));
-    for (const d of dest) need(whUse(d.wh) === 'fg', `"${whName(d.wh)}" مش فريزر منتج تام`);
-    for (const s2 of PACK_SIZES) { const tot = dest.reduce((a, d) => a + (d.packs[s2] || 0), 0); need(tot === (packs[s2] || 0), `توزيع عبوات ${s2 / 1000} كجم على الفريزرات (${tot}) مش مساوي للعدد (${packs[s2] || 0})`); }
+    const dest = (split && split.length ? split : [{ wh: fgW[0], packs }]).map(d => ({ wh: d.wh, packs: Object.fromEntries(Object.entries(d.packs || {}).map(([k, v]) => [parseInt(k, 10), v])) }));
+    for (const d of dest) { need(whUse(d.wh) === 'fg', `"${whName(d.wh)}" مش فريزر منتج تام`); for (const [k, v] of Object.entries(d.packs)) need(isInt(v) && v >= 0 && packs[k] != null || !v, `عبوة ${k} جم مش في الناتج`); }
+    for (const s2 of sizes) { const tot = dest.reduce((a, d) => a + (d.packs[s2] || 0), 0); need(tot === packs[s2], `توزيع عبوات ${s2} جم على الفريزرات (${tot}) مش مساوي للعدد (${packs[s2]})`); }
     sizes.forEach((s, i) => {
       const parts = dest.filter(d => d.packs[s] > 0);
       const v = alloc(vals[i], parts.map(d => d.packs[s]));
@@ -414,6 +613,7 @@ function closeBatch({ batchId, date, packs, split }) {
     return b;
   });
 }
+const OLD_BAG = s => !!S.items.find(i => i.cat === 'pack' && i.packFor === s); // a bag defined for a non-standard size (e.g. old 1.5 kg) is still used
 
 function priceFor(p, cust) { return cust.kind === 'wholesale' ? p.priceWholesale : p.priceRetail; }
 let orderCredit = false; // set only while decideOrder approves a WhatsApp order (pay on delivery)
@@ -421,7 +621,7 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
   return tx(() => {
     perm('sales', 'accountant'); checkDate(date);
     const c = partner(customerId); need(c.type === 'customer', 'اختار عميل');
-    need(METHOD_NAME[method], 'اختار طريقة الدفع');
+    need(method === 'credit' || methodAcc(method), 'اختار طريقة الدفع'); if (method !== 'credit') useAcc(methodAcc(method));
     if (method === 'credit' && !orderCredit) need(c.terms === 'credit', `${c.name} عميل كاش، مينفعش آجل`);
     lines = (lines || []).filter(l => l.count > 0);
     need(lines.length, 'أضف صنف واحد على الأقل');
@@ -430,11 +630,10 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
     const doc = { id: uid('V'), no, date, customerId, kind: c.kind, method, lines: [], gross: 0, discount, net: 0, vat: 0, total: 0, cost: 0, by: S.currentUser, at: stamp(date) };
     for (const ln of lines) {
       const p = item(ln.productId); need(p.cat === 'product', 'صنف غير قابل للبيع');
-      need(packsOf(p).includes(ln.packSize), 'حجم العبوة مش متاح للمنتج ده');
+      need(packsOf(p).includes(ln.packSize) || (isInt(ln.packSize) && available(p.id, whs('fg'), ln.packSize) > 0), 'حجم العبوة مش متاح للمنتج ده');
       need(isInt(ln.count) && ln.count > 0, 'عدد غير صحيح');
       const price = ln.pricePerKg != null ? ln.pricePerKg : priceFor(p, c);
       need(isInt(price) && price > 0, `سعر "${p.name}" غير صحيح`);
-      if (ln.pricePerKg != null && ln.pricePerKg !== priceFor(p, c)) perm();
       const qty = ln.count * ln.packSize;
       const parts = consume(p.id, qty, whs('fg'), ln.packSize);
       const cost = parts.reduce((s, x) => s + x.value, 0);
@@ -459,33 +658,45 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
       { acc: '1201', dr: doc.total, partner: c.id }, { acc: revAcc, cr: doc.net - (doc.deliveryNet || 0) }, ...(doc.deliveryNet ? [{ acc: '4103', cr: doc.deliveryNet }] : []), { acc: '2102', cr: doc.vat },
       { acc: '5101', dr: doc.cost }, { acc: '1305', cr: doc.cost }] }).no;
     if (method !== 'credit') {
-      doc.paidJe = post({ date, type: 'receipt', ref, memo: `تحصيل فاتورة ${no} (${METHOD_NAME[method]})`, lines: [{ acc: METHOD_ACC[method], dr: doc.total }, { acc: '1201', cr: doc.total, partner: c.id }] }).no;
+      doc.paidJe = post({ date, type: 'receipt', ref, memo: `تحصيل فاتورة ${no} (${methodName(method)})`, lines: [{ acc: methodAcc(method), dr: doc.total }, { acc: '1201', cr: doc.total, partner: c.id }] }).no;
     }
     const hex = () => Math.floor(Math.random() * 16).toString(16);
     doc.eta = { uuid: Array.from({ length: 32 }, hex).join(''), status: 'valid' };
     S.docs.invoices.push(doc);
-    audit('invoice', no, `فاتورة ${no} لـ ${c.name}: ${money(doc.total)} (${METHOD_NAME[method]})`, date);
+    audit('invoice', no, `فاتورة ${no} لـ ${c.name}: ${money(doc.total)} (${methodName(method)})`, date);
     return doc;
   });
 }
 
 function cashBalance(acc) { return S.journal.reduce((s, j) => s + j.lines.filter(l => l.acc === acc).reduce((a, l) => a + l.dr - l.cr, 0), 0); }
-function receipt({ date, customerId, amount, method, memo }) {
+let cardReceipt = false; // set only while a verified Paymob callback books its receipt
+function invoicePaid(v) { // money already collected against one sale invoice
+  const o = orders().find(x => x.invoiceId === v.id);
+  return (v.method !== 'credit' ? v.total : 0) + (o ? o.paidAmount || 0 : 0) + S.docs.receipts.filter(r => r.invoiceId === v.id).reduce((s, r) => s + r.amount, 0);
+}
+function receipt({ date, customerId, amount, method, memo, invoiceId }) {
   return tx(() => {
-    perm('accountant', 'sales'); checkDate(date);
+    if (!cardReceipt) perm('accountant', 'sales'); checkDate(date);
     const c = partner(customerId); need(c.type === 'customer', 'اختار عميل');
-    need(METHOD_ACC[method], 'اختار طريقة التحصيل');
+    need(methodAcc(method), 'اختار طريقة التحصيل'); useAcc(methodAcc(method));
     need(isInt(amount) && amount > 0, 'المبلغ غير صحيح');
+    let inv = null;
+    if (invoiceId) {
+      inv = S.docs.invoices.find(v => v.id === invoiceId); need(inv && inv.customerId === c.id, 'الفاتورة مش للعميل ده');
+      need(!orders().some(o => o.invoiceId === inv.id), 'فاتورة طلب واتساب: التحصيل بيتسجل من شاشة الطلب');
+      need(amount <= inv.total - invoicePaid(inv), `المتبقي على الفاتورة ${money(inv.total - invoicePaid(inv))} بس`);
+    }
     const no = nextNo('RC');
-    const je = post({ date, type: 'receipt', ref: { type: 'receipt', no }, memo: `تحصيل ${no} من ${c.name}${memo ? ' · ' + memo : ''}`, lines: [{ acc: METHOD_ACC[method], dr: amount }, { acc: '1201', cr: amount, partner: c.id }] });
-    const doc = { id: uid('RC'), no, date, customerId, amount, method, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    const je = post({ date, type: 'receipt', ref: { type: 'receipt', no }, memo: `تحصيل ${no} من ${c.name}${inv ? ' · فاتورة ' + inv.no : ''}${memo ? ' · ' + memo : ''}`, lines: [{ acc: methodAcc(method), dr: amount }, { acc: '1201', cr: amount, partner: c.id }] });
+    const doc = { id: uid('RC'), no, date, customerId, amount, method, memo: memo || '', je: je.no, by: S.currentUser, at: je.at, ...(inv ? { invoiceId: inv.id } : {}) };
     S.docs.receipts.push(doc);
-    audit('receipt', no, `تحصيل ${money(amount)} من ${c.name} (${METHOD_NAME[method]})`, date);
+    audit('receipt', no, `تحصيل ${money(amount)} من ${c.name} (${methodName(method)})`, date);
     return doc;
   });
 }
 /* ---------- WhatsApp orders: the bot places them (no stock or ledger effect); sales/owner approve → invoice on account ---------- */
-const ORDER_METHODS = { cash: 'كاش عند الاستلام', instapay: 'إنستاباي' };
+const ORDER_METHODS = { cash: 'كاش عند الاستلام', instapay: 'إنستاباي', card: 'فيزا أونلاين (Paymob)' };
+const PREPAID = m => m === 'instapay' || m === 'card'; // money must arrive before the order goes out
 function normPhone(s) { let d = String(s || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); if (d.startsWith('20') && d.length === 12) d = '0' + d.slice(2); return d; }
 function customerByPhone(phone) { const n = normPhone(phone); return n.length >= 8 ? S.partners.find(p => p.type === 'customer' && normPhone(p.phone) === n) || null : null; }
 function orders() { return S.docs.orders || (S.docs.orders = []); }
@@ -515,7 +726,7 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
     need(/^\d{8,15}$/.test(ph), 'رقم التليفون غير صحيح');
     need(name && String(name).trim().length >= 2 && String(name).trim().length <= 60, 'اكتب الاسم');
     need(address && String(address).trim().length >= 5 && String(address).trim().length <= 300, 'اكتب العنوان بالتفصيل');
-    need(ORDER_METHODS[method], 'اختار الدفع: كاش أو إنستاباي');
+    need(ORDER_METHODS[method], 'اختار الدفع: كاش أو إنستاباي أو فيزا');
     need(orders().filter(o => o.phone === ph && o.status === 'pending').length < 3, 'عندك ٣ طلبات لسه مستنية تأكيد');
     need(Array.isArray(lines) && lines.length && lines.length <= 30, 'الطلب فاضي');
     const merged = new Map();
@@ -566,6 +777,47 @@ function orderNotified({ id, kind, image }) { // image: the receipt picture went
     return { ok: true };
   });
 }
+function orderPayLink({ id, url, intentionId, paymobOrderId, ref, amountCents }) { // shop endpoint: a Paymob pay link was made for this order
+  return tx(() => {
+    const o = orders().find(x => x.id === id); need(o && o.method === 'card', 'مفيش طلب فيزا بالرقم ده');
+    need(!(o.card && o.card.status === 'paid') && !o.receiptNo, 'الطلب ده اتدفع خلاص');
+    need(isInt(amountCents) && amountCents === orderGrand(o), 'مبلغ لينك الدفع مش مطابق للطلب');
+    o.pay = { url: String(url || '').slice(0, 600), intentionId: String(intentionId || ''), paymobOrderId: String(paymobOrderId || ''), ref: String(ref || ''), amount: amountCents, at: stamp(today()) };
+    (o.payRefs || (o.payRefs = [])).push(o.pay.paymobOrderId); if (o.payRefs.length > 10) o.payRefs.shift();
+    olog(o, 'paylink', `لينك دفع Paymob · ${money(amountCents)}`);
+    return { ok: true };
+  });
+}
+function orderCardPaid({ paymobOrderId, ref, txId, amountCents, pan }) { // Paymob callback, HMAC already verified by the paymob function
+  return tx(() => {
+    const pid = String(paymobOrderId || ''), oid = String(ref || '').replace(/-[A-Z0-9]{1,8}$/, '');
+    const o = orders().find(x => x.method === 'card' && ((pid && (x.payRefs || []).includes(pid)) || (oid && x.id === oid)));
+    if (!o) { alert('bad', 'order', `💳⚠️ دفع Paymob وصل لطلب مش معروف\nالمبلغ ${money(amountCents)} · عملية ${txId}\nراجع لوحة Paymob`); return { notify: null, problem: 'no_order' }; }
+    if (o.card && o.card.txId === String(txId)) return { id: o.id, notify: null, problem: 'duplicate' }; // Paymob retries callbacks
+    if (o.receiptNo || (o.card && o.card.status === 'paid') || o.status === 'rejected' || !isInt(amountCents) || amountCents !== orderGrand(o)) {
+      alert('bad', 'order', `💳⚠️ دفع Paymob على طلب ${o.no} محتاج مراجعة\nالمبلغ ${money(amountCents)} (المطلوب ${money(orderGrand(o))}) · عملية ${txId}\n${o.status === 'rejected' ? 'الطلب مرفوض: رجّع الفلوس من لوحة Paymob' : o.receiptNo || o.card ? 'الطلب مدفوع قبل كده: دفع مكرر' : 'المبلغ مختلف'}`, { type: 'order', id: o.id, no: o.no });
+      if (o.test) S.alerts[S.alerts.length - 1].tg = 'test';
+      olog(o, 'card_problem', `عملية ${txId} · ${money(amountCents)}`); return { id: o.id, notify: null, problem: 'mismatch' };
+    }
+    o.card = { status: 'paid', txId: String(txId), amount: amountCents, pan: String(pan || '').slice(-4), at: stamp(today()) };
+    olog(o, 'card_paid', `Paymob · عملية ${o.card.txId} · ${money(amountCents)}`);
+    let notify = 'proofok';
+    if (o.status === 'approved') { // already approved: book the receipt now, as the system user
+      const inv = S.docs.invoices.find(v => v.id === o.invoiceId), due = inv.total - (o.paidAmount || 0), amount = Math.min(amountCents, due);
+      if (amount > 0) {
+        let rc; cardReceipt = true;
+        try { rc = receipt({ date: today(), customerId: o.customerId, amount, method: 'card', memo: `طلب واتساب ${o.no} · Paymob · عملية ${o.card.txId}` }); } finally { cardReceipt = false; }
+        o.paidAmount = (o.paidAmount || 0) + amount; (o.receipts = o.receipts || []).push(rc.no);
+        if (o.paidAmount >= inv.total) Object.assign(o, { receiptNo: rc.no, paidAt: stamp(today()), paidBy: 'paymob' });
+        olog(o, 'paid', `فيزا (Paymob) · ${rc.no} · ${money(amount)}`); notify = 'paid';
+      }
+    }
+    alert('info', 'order', `💳 دفع فيزا وصل ✅ · ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${o.phone}\nالمبلغ ${money(amountCents)} · كارت ${o.card.pan ? '•••• ' + o.card.pan : ''}\nعملية Paymob ${o.card.txId}${o.status === 'pending' ? '\nالطلب لسه مستني موافقة من «طلبات واتساب»' : ''}`, { type: 'order', id: o.id, no: o.no });
+    if (o.test) S.alerts[S.alerts.length - 1].tg = 'test';
+    audit('order_card_paid', o.no, `دفع فيزا Paymob لطلب ${o.no}: ${money(amountCents)}`);
+    return { id: o.id, no: o.no, test: !!o.test, notify };
+  });
+}
 function orderView(id) { // read-only: what the bot needs to message the customer
   const o = orders().find(x => x.id === id); if (!o) return null;
   const inv = o.invoiceId ? S.docs.invoices.find(v => v.id === o.invoiceId) : null;
@@ -574,7 +826,7 @@ function orderView(id) { // read-only: what the bot needs to message the custome
     invoice: inv ? { no: inv.no, date: inv.date, net: egpOf(inv.net), vat: egpOf(inv.vat), total: egpOf(inv.total), vatRate: S.settings.vatRate, deliveryFee: egpOf(inv.deliveryFee || 0) } : null,
     delivery: o.delivery ? { fee: egpOf(o.delivery.fee || 0), eta: (o.delivery.eta && o.delivery.eta.text) || '', note: o.delivery.note || '' } : null,
     paidAmount: egpOf(o.receiptNo && inv ? inv.total : o.paidAmount || 0), due: inv ? egpOf(Math.max(0, inv.total - (o.receiptNo ? inv.total : o.paidAmount || 0))) : null,
-    receiptNo: o.receiptNo || '', sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt, out: !!o.outAt, delivered: !!o.deliveredAt };
+    receiptNo: o.receiptNo || '', cardPaid: !!(o.card && o.card.status === 'paid'), sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt, out: !!o.outAt, delivered: !!o.deliveredAt };
 }
 function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
   return tx(() => {
@@ -593,7 +845,8 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
     const invOf = () => S.docs.invoices.find(v => v.id === o.invoiceId);
     const collect = (amount, memo) => { // record money from the customer against this order's invoice
       const inv = invOf(), due = inv.total - (o.paidAmount || 0); amount = Math.min(amount, due); if (amount <= 0) return null;
-      const rc = receipt({ date: T, customerId: o.customerId, amount, method: o.method, memo: `طلب واتساب ${o.no}${memo ? ' · ' + memo : ''}` });
+      let rc; orderMoney = true;
+      try { rc = receipt({ date: T, customerId: o.customerId, amount, method: o.method, memo: `طلب واتساب ${o.no}${memo ? ' · ' + memo : ''}` }); } finally { orderMoney = false; }
       o.paidAmount = (o.paidAmount || 0) + amount; (o.receipts = o.receipts || []).push(rc.no);
       if (o.paidAmount >= inv.total) Object.assign(o, { receiptNo: rc.no, paidAt: stamp(T), paidBy: S.currentUser });
       olog(o, 'paid', `${METHOD_NAME[o.method]} · ${rc.no} · ${money(amount)}${o.paidAmount < inv.total ? ` · باقي ${money(inv.total - o.paidAmount)}` : ''}`); return rc;
@@ -618,7 +871,7 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
       olog(o, 'approved', `فاتورة ${inv.no}`);
       audit('order_approve', o.no, `موافقة على طلب واتساب ${o.no} ← فاتورة ${inv.no}`);
     };
-    if (action === 'approve') { approve(); if (o.proof && o.proof.status === 'ok') collect(orderGrand(o), 'تحويل إنستاباي'); return o; }
+    if (action === 'approve') { approve(); if (o.proof && o.proof.status === 'ok') collect(orderGrand(o), 'تحويل إنستاباي'); else if (o.card && o.card.status === 'paid') collect(o.card.amount, `Paymob · عملية ${o.card.txId}`); return o; }
     if (action === 'proofok') { // the owner checked the InstaPay transfer: it arrived
       need(o.proof && o.proof.status === 'pending' && !o.receiptNo, 'مفيش صورة تحويل مستنية مراجعة');
       o.proof.status = 'ok'; olog(o, 'proof_ok', 'التحويل وصل');
@@ -639,7 +892,7 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
     if (action === 'paid') {
       need(!o.receiptNo, 'الطلب ده اتحصّل قبل كده');
       if (o.status === 'pending') { // InstaPay confirmed before review (Telegram «وصلت»): only mark the transfer, the invoice waits for the review
-        need(o.proof && o.proof.status !== 'rejected', 'الطلب لازم يتوافق عليه الأول');
+        need(o.method !== 'card' && o.proof && o.proof.status !== 'rejected', 'الطلب لازم يتوافق عليه الأول');
         o.proof.status = 'ok'; olog(o, 'proof_ok', 'التحويل وصل'); return o;
       }
       need(o.status === 'approved', 'الطلب لازم يكون متوافق عليه');
@@ -653,12 +906,12 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
     }
     if (action === 'out') { // the order left with the driver
       need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول'); need(!o.test, 'ده طلب تجربة'); need(!o.deliveredAt, 'الطلب ده اتسلّم خلاص');
-      need(o.method !== 'instapay' || o.receiptNo, 'التحويل لسه متأكدش: أكّد إن الفلوس وصلت الأول');
+      need(!PREPAID(o.method) || o.receiptNo, 'الدفع لسه متأكدش: أكّد إن الفلوس وصلت الأول');
       o.outAt = stamp(T); o.outBy = S.currentUser; olog(o, 'out', ''); return o;
     }
     if (action === 'delivered') { // the customer got it: closes the order (cash is collected on delivery)
       need(o.status === 'approved', 'الطلب لازم يتوافق عليه الأول'); need(!o.test, 'ده طلب تجربة'); need(!o.deliveredAt, 'الطلب ده اتسلّم خلاص');
-      if (!o.receiptNo) { need(o.method !== 'instapay', 'التحويل لسه متأكدش: أكّد إن الفلوس وصلت الأول'); collect(invOf().total, 'كاش عند الاستلام'); if (o.sentAt && o.receiptNo) o.invoiceSentAt = stamp(T); }
+      if (!o.receiptNo) { need(!PREPAID(o.method), 'الدفع لسه متأكدش: أكّد إن الفلوس وصلت الأول'); collect(invOf().total, 'كاش عند الاستلام'); if (o.sentAt && o.receiptNo) o.invoiceSentAt = stamp(T); }
       if (!o.outAt) { o.outAt = stamp(T); o.outBy = S.currentUser; }
       o.deliveredAt = stamp(T); o.deliveredBy = S.currentUser; olog(o, 'delivered', ''); return o;
     }
@@ -671,44 +924,186 @@ function supplierPayment({ date, supplierId, amount, method, memo }) {
   return tx(() => {
     perm('accountant'); checkDate(date);
     const s = partner(supplierId); need(s.type === 'supplier', 'اختار مورد');
-    need(METHOD_ACC[method], 'اختار طريقة السداد');
-    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح');
-    need(cashBalance(METHOD_ACC[method]) >= amount, `رصيد ${METHOD_NAME[method]} مش كفاية`);
+    const acc = useAcc(methodAcc(method), { pay: true });
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح'); enough(acc, amount);
     const no = nextNo('PY');
-    const je = post({ date, type: 'payment', ref: { type: 'payment', no }, memo: `سداد ${no} لـ ${s.name}${memo ? ' · ' + memo : ''}`, lines: [{ acc: '2101', dr: amount, partner: s.id }, { acc: METHOD_ACC[method], cr: amount }] });
+    const je = post({ date, type: 'payment', ref: { type: 'payment', no }, memo: `سداد ${no} لـ ${s.name}${memo ? ' · ' + memo : ''}`, lines: [{ acc: '2101', dr: amount, partner: s.id }, { acc, cr: amount }] });
     const doc = { id: uid('PY'), no, date, supplierId, amount, method, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
     S.docs.payments.push(doc);
-    audit('payment', no, `سداد ${money(amount)} لـ ${s.name} (${METHOD_NAME[method]})`, date);
+    audit('payment', no, `سداد ${money(amount)} لـ ${s.name} (${methodName(method)})`, date);
     return doc;
   });
 }
-const EXPENSE_ACCS = ['5201', '5202', '5203', '5301', '5302', '5401', '5402', '5403'];
 function expense({ date, acc, amount, method, memo }) {
   return tx(() => {
     perm('accountant'); checkDate(date);
     need(EXPENSE_ACCS.includes(acc), 'اختار نوع المصروف');
-    need(METHOD_ACC[method], 'اختار طريقة الدفع');
-    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح');
-    need(cashBalance(METHOD_ACC[method]) >= amount, `رصيد ${METHOD_NAME[method]} مش كفاية`);
+    const pacc = useAcc(methodAcc(method), { pay: true });
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح'); enough(pacc, amount);
     const no = nextNo('EX');
     const name = ACCOUNTS.find(a => a.code === acc).name;
-    const je = post({ date, type: 'expense', ref: { type: 'expense', no }, memo: `${name}${memo ? ' · ' + memo : ''}`, lines: [{ acc, dr: amount }, { acc: METHOD_ACC[method], cr: amount }] });
+    const je = post({ date, type: 'expense', ref: { type: 'expense', no }, memo: `${name}${memo ? ' · ' + memo : ''}`, lines: [{ acc, dr: amount }, { acc: pacc, cr: amount }] });
     const doc = { id: uid('EX'), no, date, acc, amount, method, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
     S.docs.expenses.push(doc);
     audit('expense', no, `مصروف ${name}: ${money(amount)}`, date);
     return doc;
   });
 }
-function cashTransfer({ date, from, to, amount }) {
+const TRANSFERABLE = ['cash', 'bank', 'wallet', 'gateway'];
+function cashTransfer({ date, from, to, amount, memo }) {
   return tx(() => {
     perm('accountant'); checkDate(date);
-    need(METHOD_ACC[from] && METHOD_ACC[to] && from !== to, 'اختار حسابين مختلفين');
-    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح');
-    need(cashBalance(METHOD_ACC[from]) >= amount, `رصيد ${METHOD_NAME[from]} مش كفاية`);
+    const fa = methodAcc(from), ta = methodAcc(to);
+    need(fa && ta && fa !== ta, 'اختار حسابين مختلفين');
+    need(TRANSFERABLE.includes(moneyKind(fa)) && TRANSFERABLE.includes(moneyKind(ta)), 'التحويل بيكون بين الخزن والبنوك والمحافظ بس');
+    for (const a of [fa, ta]) { if (a === '1107') need(me().role === 'owner', 'الخزنة الرئيسية للمالك بس'); staffOnly(a); }
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح'); enough(fa, amount);
     const no = nextNo('CT');
-    const je = post({ date, type: 'cash', ref: { type: 'cash', no }, memo: `تحويل من ${METHOD_NAME[from]} إلى ${METHOD_NAME[to]}`, lines: [{ acc: METHOD_ACC[to], dr: amount }, { acc: METHOD_ACC[from], cr: amount }] });
-    S.docs.cash.push({ id: uid('CT'), no, date, from, to, amount, je: je.no, by: S.currentUser, at: je.at });
-    audit('cash', no, `تحويل ${money(amount)} من ${METHOD_NAME[from]} إلى ${METHOD_NAME[to]}`, date);
+    const je = post({ date, type: 'cash', ref: { type: 'cash', no }, memo: `تحويل من ${accLabel(fa)} إلى ${accLabel(ta)}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`, lines: [{ acc: ta, dr: amount }, { acc: fa, cr: amount }] });
+    S.docs.cash.push({ id: uid('CT'), no, date, from, to, amount, memo: memo || '', je: je.no, by: S.currentUser, at: je.at });
+    audit('cash', no, `تحويل ${money(amount)} من ${accLabel(fa)} إلى ${accLabel(ta)}`, date);
+  });
+}
+/* ---------- money in from anywhere (a cheque cashed, a partner's money, a loan, other income) ---------- */
+const DEPOSIT_KINDS = { cheque: 'شيك', cash: 'كاش', transfer: 'تحويل', other: 'أخرى' };
+const depositSources = () => ACCOUNTS.filter(a => LEAF.has(a.code) && ((a.code[0] === '3' && a.code !== '3201') || moneyKind(a.code) === 'loan' || a.code[0] === '4' && !['4101', '4102', '4103'].includes(a.code) || TRANSFERABLE.includes(moneyKind(a.code)))).map(a => a.code);
+function deposit({ date, to, amount, source, kind, memo, ref }) {
+  return tx(() => {
+    perm('accountant'); checkDate(date);
+    const ta = methodAcc(to); need(ta && TRANSFERABLE.includes(moneyKind(ta)) && ta !== '1104', 'اختار الخزنة أو البنك اللي الفلوس داخلة فيه');
+    if (ta === '1107') need(me().role === 'owner', 'الخزنة الرئيسية للمالك بس');
+    staffOnly(ta);
+    need(depositSources().includes(source) && source !== ta, 'اختار الفلوس جاية منين');
+    if (moneyKind(source)) staffOnly(source);
+    if (source === '1107') need(me().role === 'owner', 'الخزنة الرئيسية للمالك بس');
+    need(DEPOSIT_KINDS[kind], 'اختار نوع الفلوس (شيك، كاش، تحويل…)');
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح');
+    memo = String(memo || '').trim().slice(0, 200); need(memo.length >= 2, 'اكتب البيان: الفلوس دي إيه؟');
+    if (TRANSFERABLE.includes(moneyKind(source))) enough(source, amount);
+    const no = nextNo('DP');
+    const je = post({ date, type: 'deposit', ref: { type: 'deposit', no }, memo: `إضافة فلوس (${DEPOSIT_KINDS[kind]}${ref ? ' رقم ' + String(ref).slice(0, 40) : ''}) إلى ${accLabel(ta)} من ${accLabel(source)} · ${memo}`, lines: [{ acc: ta, dr: amount }, { acc: source, cr: amount }] });
+    const doc = { id: uid('DP'), no, date, to: ta, source, kind, ref: ref ? String(ref).slice(0, 40) : '', amount, memo, je: je.no, by: S.currentUser, at: je.at };
+    S.docs.deposits.push(doc);
+    audit('deposit', no, `إضافة ${money(amount)} إلى ${accLabel(ta)} (${DEPOSIT_KINDS[kind]}) من ${accLabel(source)}: ${memo}`, date);
+    return doc;
+  });
+}
+/* ---------- paying a loan or a credit card: principal + bank cost ---------- */
+function payLiability({ date, acc, from, amount, cost = 0, memo }) {
+  return tx(() => {
+    perm(); checkDate(date); // loans and credit cards are the owner's
+    need(['loan', 'credit'].includes(moneyKind(acc)), 'اختار القرض أو الكريدت');
+    const fa = methodAcc(from); need(fa && TRANSFERABLE.includes(moneyKind(fa)) && fa !== '1104', 'اختار هتدفع منين');
+    if (fa === '1107') need(me().role === 'owner', 'الخزنة الرئيسية للمالك بس');
+    need(isInt(amount) && amount >= 0 && isInt(cost) && cost >= 0 && amount + cost > 0, 'المبلغ غير صحيح');
+    if (amount) need(amount <= bal(ledger({}), acc), `المبلغ أكبر من رصيد ${accLabel(acc)}`);
+    enough(fa, amount + cost);
+    const no = nextNo('LP');
+    const costAcc = moneyKind(acc) === 'loan' ? '5601' : '5602';
+    const je = post({ date, type: 'liability', ref: { type: 'liability', no }, memo: `سداد ${accLabel(acc)} من ${accLabel(fa)}${cost ? ` (منها ${accLabel(costAcc)} ${money(cost)})` : ''}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`,
+      lines: [{ acc, dr: amount }, { acc: costAcc, dr: cost }, { acc: fa, cr: amount + cost }] });
+    const doc = { id: uid('LP'), no, date, acc, from: fa, amount, cost, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    S.docs.liabPays.push(doc);
+    audit('liability', no, `سداد ${money(amount + cost)} على ${accLabel(acc)}`, date);
+    return doc;
+  });
+}
+/* ---------- staff advances (سلف) and money custody with drivers (عهد): who has the company's money ---------- */
+function staffId(name) {
+  name = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 60); need(name.length >= 2, 'اكتب اسم العامل');
+  let st = S.staff.find(x => x.name === name);
+  if (!st) { st = { id: uid('ST'), name, at: stamp(today()) }; S.staff.push(st); }
+  return st.id;
+}
+const staffName = id => (S.staff.find(x => x.id === id) || {}).name || '—';
+function personBalance(kind, id) { return (kind === 'advance' ? S.docs.advances : S.docs.custody).filter(d => d.staffId === id).reduce((s, d) => s + (d.out || 0) - (d.back || 0) - (d.spent || 0), 0); }
+function advance({ date, name, amount, method, memo }) {
+  return tx(() => {
+    perm('accountant'); checkDate(date);
+    const fa = useAcc(methodAcc(method), { pay: true }); need(moneyKind(fa) !== 'credit', 'السلفة بتتصرف من خزنة أو بنك');
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح'); enough(fa, amount);
+    const sid = staffId(name), no = nextNo('ADV');
+    const je = post({ date, type: 'advance', ref: { type: 'advance', no }, memo: `سلفة لـ ${staffName(sid)}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`, lines: [{ acc: '1202', dr: amount }, { acc: fa, cr: amount }] });
+    const doc = { id: uid('ADV'), no, date, staffId: sid, out: amount, from: fa, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    S.docs.advances.push(doc);
+    audit('advance', no, `سلفة ${money(amount)} لـ ${staffName(sid)}`, date);
+    return doc;
+  });
+}
+function advanceBack({ date, name, amount, method, memo }) { // the worker paid some back (or it was taken from his pay)
+  return tx(() => {
+    perm('accountant'); checkDate(date);
+    const sid = staffId(name), ta = useAcc(methodAcc(method)); need(moneyKind(ta) !== 'credit', 'اختار الخزنة أو البنك');
+    need(isInt(amount) && amount > 0 && amount <= personBalance('advance', sid), `المبلغ أكبر من السلفة اللي على ${staffName(sid)}`);
+    const no = nextNo('ADV');
+    const je = post({ date, type: 'advance', ref: { type: 'advance', no }, memo: `رد سلفة من ${staffName(sid)}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`, lines: [{ acc: ta, dr: amount }, { acc: '1202', cr: amount }] });
+    const doc = { id: uid('ADV'), no, date, staffId: sid, back: amount, to: ta, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    S.docs.advances.push(doc);
+    audit('advance', no, `رد سلفة ${money(amount)} من ${staffName(sid)}`, date);
+    return doc;
+  });
+}
+function custody({ date, name, amount, method, memo }) { // money handed to a driver/rep to spend on the road
+  return tx(() => {
+    perm('accountant'); checkDate(date);
+    const fa = useAcc(methodAcc(method), { pay: true }); need(moneyKind(fa) !== 'credit', 'العهدة بتتصرف من خزنة أو بنك');
+    need(isInt(amount) && amount > 0, 'المبلغ غير صحيح'); enough(fa, amount);
+    const sid = staffId(name), no = nextNo('CU');
+    const je = post({ date, type: 'custody', ref: { type: 'custody', no }, memo: `عهدة مع ${staffName(sid)}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`, lines: [{ acc: '1203', dr: amount }, { acc: fa, cr: amount }] });
+    const doc = { id: uid('CU'), no, date, staffId: sid, out: amount, from: fa, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    S.docs.custody.push(doc);
+    audit('custody', no, `عهدة ${money(amount)} مع ${staffName(sid)}`, date);
+    return doc;
+  });
+}
+function settleCustody({ date, name, back = 0, method, spent = 0, acc, memo }) { // he came back: money returned and/or spent on an expense
+  return tx(() => {
+    perm('accountant'); checkDate(date);
+    const sid = staffId(name);
+    need(isInt(back) && back >= 0 && isInt(spent) && spent >= 0 && back + spent > 0, 'اكتب اللي رجع واللي اتصرف');
+    need(back + spent <= personBalance('custody', sid), `ده أكتر من العهدة اللي مع ${staffName(sid)}`);
+    const ta = back ? useAcc(methodAcc(method)) : null; if (back) need(moneyKind(ta) !== 'credit', 'اختار الخزنة أو البنك');
+    if (spent) need(EXPENSE_ACCS.includes(acc), 'اختار نوع المصروف');
+    const no = nextNo('CU');
+    const je = post({ date, type: 'custody', ref: { type: 'custody', no }, memo: `تسوية عهدة ${staffName(sid)}${memo ? ' · ' + String(memo).slice(0, 120) : ''}`,
+      lines: [...(back ? [{ acc: ta, dr: back }] : []), ...(spent ? [{ acc, dr: spent }] : []), { acc: '1203', cr: back + spent }] });
+    const doc = { id: uid('CU'), no, date, staffId: sid, back, spent, to: ta, acc: spent ? acc : null, memo: memo || '', je: je.no, by: S.currentUser, at: je.at };
+    S.docs.custody.push(doc);
+    audit('custody', no, `تسوية عهدة ${staffName(sid)}: رجع ${money(back)} · اتصرف ${money(spent)}`, date);
+    return doc;
+  });
+}
+/* ---------- the owner edits the chart: add accounts (a new bank, a new expense…), rename, delete unused ones ---------- */
+const NEW_UNDER = { '11': 'fixed', '12': 'current', '21': 'liab', '22': 'loan', '3': 'equity', '4': 'income', '52': 'exp', '53': 'exp', '54': 'exp', '56': 'exp' };
+function saveAccount({ code, name, parent, money: mk }) {
+  return tx(() => {
+    perm(); // owner only
+    name = String(name || '').trim().slice(0, 60); need(name.length >= 2, 'اكتب اسم الحساب');
+    need(!ACCOUNTS.some(a => a.name === name && a.code !== code), 'فيه حساب بنفس الاسم');
+    if (code) { // rename only: codes, parents and kinds never change, so old entries stay where they are
+      const a = accOf(code); need(a, 'الحساب غير موجود');
+      if (a.sys) S.coa.names[code] = name; else S.coa.added.find(x => x.code === code).name = name;
+      applyCoa(S.coa); audit('account', code, `تغيير اسم الحساب ${code} إلى ${name}`); return accOf(code);
+    }
+    need(NEW_UNDER[parent], 'اختار المجموعة اللي الحساب تحتها');
+    const kinds = { current: ['', 'cash', 'bank', 'wallet'], liab: ['', 'credit'], loan: ['loan'] }[NEW_UNDER[parent]] || [''];
+    mk = mk || (NEW_UNDER[parent] === 'loan' ? 'loan' : ''); need(kinds.includes(mk), 'نوع الحساب مش مناسب للمجموعة دي');
+    const base = parent.length === 1 ? parent + '9' : parent; // 3 → 39xx, 4 → 49xx, 52 → 52xx…
+    const used = ACCOUNTS.filter(a => a.code.length === 4 && a.code.startsWith(base)).map(a => parseInt(a.code.slice(2), 10));
+    const n = Math.max(parent.length === 1 ? 0 : 50, ...used) + 1; need(n <= 99, 'المجموعة دي اتملت');
+    const a = { code: base + String(n).padStart(2, '0'), name, parent, ...(mk ? { money: mk } : {}) };
+    S.coa.added.push(a); applyCoa(S.coa);
+    audit('account', a.code, `إضافة حساب ${a.code} ${name} تحت ${accLabel(parent)}`);
+    return accOf(a.code);
+  });
+}
+function deleteAccount(code) {
+  return tx(() => {
+    perm();
+    const a = accOf(code); need(a && !a.sys, 'ده حساب أساسي في السيستم، ينفع تغيّر اسمه بس');
+    need(!S.journal.some(j => j.lines.some(l => l.acc === code)), 'الحساب عليه قيود، مينفعش يتمسح');
+    S.coa.added = S.coa.added.filter(x => x.code !== code); applyCoa(S.coa);
+    audit('account', code, `مسح الحساب ${code} ${a.name}`);
   });
 }
 function monthlyDepreciation(s) { return s.assets.reduce((sum, a) => sum + Math.round(a.value * a.rate / 100 / 12), 0); }
@@ -872,6 +1267,11 @@ function setRecipe(productId, mix) {
 }
 
 /* ---------- master data ---------- */
+function cleanPacks(list) { // a product's pack sizes, in grams: standard ones or any open weight
+  need(Array.isArray(list), 'اختار العبوات');
+  const out = [...new Set(list.map(Number))].filter(g => PACK_SIZES.includes(g) || isOpenWeight(g)).sort((a, b) => a - b);
+  need(out.length, 'اختار عبوة واحدة على الأقل'); return out;
+}
 function saveItem(o) {
   return tx(() => {
     perm();
@@ -885,6 +1285,7 @@ function saveItem(o) {
     }
     for (const f of ['priceRetail', 'priceWholesale', 'minQty', 'vat']) need(isInt(o[f] || 0) && (o[f] || 0) >= 0, 'قيمة غير صحيحة');
     if (o.cat === 'product') need(o.priceRetail > 0 && o.priceWholesale > 0, 'المنتج لازم له سعر قطاعي وجملة');
+    const sub = o.cat === 'meat' || o.cat === 'byproduct' ? String(o.sub || '').trim().slice(0, 40) : ''; // worker-screen section (بلدي فريش، برازيلي، دهون…)
     if (o.id) {
       const it = item(o.id);
       for (const f of ['priceRetail', 'priceWholesale']) if (it[f] !== o[f]) {
@@ -894,13 +1295,17 @@ function saveItem(o) {
       if (it.unit !== o.unit) need(!S.lots.some(l => l.itemId === it.id), 'مينفعش تغيّر وحدة صنف عليه حركات');
       if (it.cat !== o.cat) need(!S.lots.some(l => l.itemId === it.id), 'مينفعش تغيّر نوع صنف عليه حركات');
       if (it.cat === 'product' && o.group) it.group = o.group;
+      if (it.cat === 'product' && o.packs) it.packs = cleanPacks(o.packs);
+      if (sub) it.sub = sub; else delete it.sub;
       Object.assign(it, { name: o.name.trim(), code: o.code, cat: o.cat, unit: o.unit, priceRetail: o.priceRetail || 0, priceWholesale: o.priceWholesale || 0, minQty: o.minQty || 0, vat: o.vat || 0 });
       audit('item_edit', it.code, `تعديل بيانات الصنف ${it.name}`);
       return it;
     }
     need(!S.items.some(i => i.name === o.name.trim()), 'فيه صنف بنفس الاسم');
     const it = { id: uid('IT'), code: o.code, name: o.name.trim(), cat: o.cat, unit: o.cat === 'pack' ? 'pc' : o.unit, priceRetail: o.priceRetail || 0, priceWholesale: o.priceWholesale || 0, minQty: o.minQty || 0, vat: o.vat || 0, active: true };
-    if (o.cat === 'product') { it.packs = PACK_SIZES.slice(); it.group = o.group || 'مصنعات'; }
+    if (o.cat === 'product') { it.packs = o.packs ? cleanPacks(o.packs) : PACK_SIZES.slice(); it.group = o.group || 'مصنعات'; }
+    if (o.cat === 'pack' && o.packFor) { need(isInt(o.packFor) && o.packFor >= 50 && o.packFor <= 20000 && !S.items.some(i => i.cat === 'pack' && i.packFor === o.packFor), 'فيه كيس معرّف للوزن ده'); it.packFor = o.packFor; }
+    if (sub) it.sub = sub;
     S.items.push(it);
     audit('item_add', it.code, `إضافة صنف جديد: ${it.name}`);
     return it;
@@ -937,11 +1342,24 @@ function updateSettings(o) {
   return tx(() => {
     perm();
     need(isInt(o.issueLimitKg) && o.issueLimitKg > 0, 'حد الصرف غير صحيح');
-    need(isInt(o.vatRate) && o.vatRate >= 0 && o.vatRate <= 100, 'نسبة الضريبة غير صحيحة');
-    S.settings.issueLimitKg = o.issueLimitKg; S.settings.vatRate = o.vatRate; S.settings.telegram = !!o.telegram;
+    S.settings.issueLimitKg = o.issueLimitKg; S.settings.vatRate = 0; S.settings.telegram = !!o.telegram;
     S.settings.tgToken = (o.tgToken || '').trim(); S.settings.tgChat = (o.tgChat || '').trim();
     Object.assign(S.settings.company, o.company || {});
-    audit('settings', 'الإعدادات', `تعديل الإعدادات: حد الصرف ${o.issueLimitKg} كجم، الضريبة ${o.vatRate}%`);
+    audit('settings', 'الإعدادات', `تعديل الإعدادات: حد الصرف ${o.issueLimitKg} كجم`);
+  });
+}
+function updateAccess(map) { // the owner decides which screens each role sees (the engine still guards every operation)
+  return tx(() => {
+    perm();
+    need(map && typeof map === 'object' && !Array.isArray(map), 'بيانات الصلاحيات غير صحيحة');
+    const out = {};
+    for (const [page, roles] of Object.entries(map)) {
+      need(/^[a-z]{2,20}$/.test(page) && Array.isArray(roles), 'بيانات الصلاحيات غير صحيحة');
+      out[page] = [...new Set(roles.filter(r => ROLES[r] && r !== 'owner' && r !== 'pending'))];
+    }
+    S.settings.access = out;
+    audit('access', 'الصلاحيات', `تعديل الشاشات المسموحة لكل دور (${Object.keys(out).length} شاشة)`);
+    return out;
   });
 }
 function markAlertsRead(ids) { return tx(() => { S.alerts.forEach(a => { if (!ids || ids.includes(a.id)) a.read = true; }); }); }
@@ -973,32 +1391,35 @@ function trialBalance({ from, to }) {
 function incomeStatement({ from, to }) {
   const m = ledger({ from, to });
   const r = { retail: bal(m, '4101'), wholesale: bal(m, '4102'), delivery: bal(m, '4103') };
-  r.revenue = r.retail + r.wholesale + r.delivery;
+  r.other = leafUnder('4').filter(c => !['4101', '4102', '4103'].includes(c)).map(c => ({ code: c, amount: bal(m, c) }));
+  r.otherT = r.other.reduce((x, y) => x + y.amount, 0);
+  r.revenue = r.retail + r.wholesale + r.delivery + r.otherT;
   r.cogs = bal(m, '5101');
   r.gross = r.revenue - r.cogs;
-  r.factory = ['5102', '5201', '5202', '5203'].map(c => ({ code: c, amount: bal(m, c) }));
-  r.selling = ['5301', '5302'].map(c => ({ code: c, amount: bal(m, c) }));
-  r.admin = ['5401', '5402', '5403', '5501'].map(c => ({ code: c, amount: bal(m, c) }));
+  const grp = g => leafUnder(g).sort().map(c => ({ code: c, amount: bal(m, c) }));
+  r.factory = grp('52'); r.selling = grp('53'); r.admin = grp('54'); r.finance = grp('56');
   const s = a => a.reduce((x, y) => x + y.amount, 0);
-  r.factoryT = s(r.factory); r.sellingT = s(r.selling); r.adminT = s(r.admin);
-  r.opex = r.factoryT + r.sellingT + r.adminT;
+  r.factoryT = s(r.factory); r.sellingT = s(r.selling); r.adminT = s(r.admin); r.financeT = s(r.finance);
+  r.opex = r.factoryT + r.sellingT + r.adminT + r.financeT;
   r.net = r.gross - r.opex;
   return r;
 }
 function balanceSheet({ asOf }) {
   const m = ledger({ to: asOf });
   const B = c => bal(m, c);
-  const fixed = ['1501', '1502', '1503', '1504'].map(c => ({ code: c, amount: B(c) }));
+  const fixed = leafUnder('11').filter(c => c !== '1599').sort().map(c => ({ code: c, amount: B(c) }));
   const dep = B('1599'); // contra: debit nature => negative value
-  const current = ['1101', '1102', '1103', '1201', '1301', '1302', '1303', '1304', '1305', '1401'].map(c => ({ code: c, amount: B(c) }));
-  const liab = ['2101', '2102'].map(c => ({ code: c, amount: B(c) }));
+  const order = c => ACCOUNTS.findIndex(a => a.code === c);
+  const current = leafUnder('12').sort((a, b) => order(a) - order(b)).map(c => ({ code: c, amount: B(c) })).filter(x => x.amount || !['1102', '1401'].includes(x.code));
+  const liab = leafUnder('21').sort((a, b) => order(a) - order(b)).map(c => ({ code: c, amount: B(c) })).filter(x => x.amount || x.code !== '2102');
+  const loans = leafUnder('22').sort((a, b) => order(a) - order(b)).map(c => ({ code: c, amount: B(c) }));
   const earnings = leafUnder('4').reduce((s, c) => s + B(c), 0) - leafUnder('5').reduce((s, c) => s + B(c), 0);
-  const equity = [{ code: '3101', amount: B('3101') }, { code: '3201', amount: B('3201') }];
+  const equity = leafUnder('3').sort((a, b) => order(a) - order(b)).map(c => ({ code: c, amount: B(c) }));
   const sum = a => a.reduce((s, x) => s + x.amount, 0);
   const fixedNet = sum(fixed) + dep;
   const assets = fixedNet + sum(current);
-  const liabT = sum(liab), equityT = sum(equity) + earnings;
-  return { fixed, dep, fixedNet, current, currentT: sum(current), assets, liab, liabT, equity, earnings, equityT, balanced: assets === liabT + equityT, diff: assets - liabT - equityT };
+  const liabT = sum(liab) + sum(loans), equityT = sum(equity) + earnings;
+  return { fixed, dep, fixedNet, current, currentT: sum(current), assets, liab, loans, loansT: sum(loans), liabT, equity, earnings, equityT, balanced: assets === liabT + equityT, diff: assets - liabT - equityT };
 }
 function manufacturingAccount({ from, to }) {
   const before = ledger({ to: addDays(from, -1) }), end = ledger({ to });
@@ -1041,6 +1462,11 @@ function partnerBalance(id) {
   let b = 0; for (const j of S.journal) for (const l of j.lines) if (l.acc === acc && l.partner === id) b += p.type === 'customer' ? l.dr - l.cr : l.cr - l.dr;
   return b;
 }
+function partnerTotals(id) { // customer: billed / collected / still owes · supplier: billed / paid / still owed
+  const p = partner(id); const acc = p.type === 'customer' ? '1201' : '2101';
+  let up = 0, down = 0; for (const j of S.journal) for (const l of j.lines) if (l.acc === acc && l.partner === id) { if (p.type === 'customer') { up += l.dr; down += l.cr; } else { up += l.cr; down += l.dr; } }
+  return { billed: up, settled: down, balance: up - down };
+}
 function partnerStatement(id) {
   const p = partner(id); const acc = p.type === 'customer' ? '1201' : '2101';
   let run = 0; const rows = [];
@@ -1060,7 +1486,7 @@ function integrity() {
     const lotsV = S.lots.filter(l => CAT_ACC[l.cat] === acc).reduce((s, l) => s + l.value, 0);
     checks.push({ name: `${ACCOUNTS.find(a => a.code === acc).name} = قيمة الدفعات في المخازن`, ok: lotsV === bal(m, acc), detail: `${money(bal(m, acc))}` });
   }
-  const wip = S.docs.batches.filter(b => b.status === 'open').reduce((s, b) => s + b.issues.filter(i => !i.reversed).reduce((a, i) => a + i.value, 0), 0);
+  const wip = S.docs.batches.filter(b => b.status !== 'closed').reduce((s, b) => s + batchCostNow(b), 0) + butcheries().filter(r => r.status === 'open').reduce((s, r) => s + butCost(r), 0);
   checks.push({ name: 'إنتاج تحت التشغيل = تكلفة التشغيلات المفتوحة', ok: wip === bal(m, '1304'), detail: money(bal(m, '1304')) });
   const cust = S.partners.filter(p => p.type === 'customer').reduce((s, p) => s + partnerBalance(p.id), 0);
   checks.push({ name: 'رصيد العملاء = مجموع كشوف الحساب', ok: cust === bal(m, '1201'), detail: money(bal(m, '1201')) });
@@ -1068,7 +1494,7 @@ function integrity() {
   checks.push({ name: 'رصيد الموردين = مجموع كشوف الحساب', ok: sup === bal(m, '2101'), detail: money(bal(m, '2101')) });
   const bs = balanceSheet({ asOf: today() });
   checks.push({ name: 'الميزانية: الأصول = الخصوم + حقوق الملكية', ok: bs.balanced, detail: money(bs.assets) });
-  checks.push({ name: 'مفيش رصيد سالب في المخازن أو الخزنة', ok: S.lots.every(l => l.qty >= 0 && l.value >= 0) && ['1101', '1102', '1103'].every(c => bal(m, c) >= 0), detail: '' });
+  checks.push({ name: 'مفيش رصيد سالب في المخازن أو الخزنة', ok: S.lots.every(l => l.qty >= 0 && l.value >= 0) && [...LEAF].filter(isOut).every(c => bal(m, c) >= 0), detail: '' });
   return checks;
 }
 /* live alerts: low stock & expiry (computed, not stored) */
@@ -1125,7 +1551,7 @@ function masterData() {
   const I = (code, name, cat, unit, retail, extra = {}) => { const it = { id: 'it_' + code, code, name, cat, unit, priceRetail: egp(retail || 0), priceWholesale: egp(retail ? Math.round(retail * 0.9 / 5) * 5 : 0), minQty: 0, vat: 0, active: true, ...extra }; S.items.push(it); return it; };
   I('RM-100', 'ربع بقري انجوس بالعضم', 'carcass', 'kg', 0, { minQty: kg(300) });
   I('RM-190', 'عضم', 'byproduct', 'kg', 0);
-  I('RM-106', 'دهن بقري (خام)', 'meat', 'kg', 140, { minQty: kg(60) });
+  I('RM-106', 'دهن بقري (خام)', 'meat', 'kg', 140, { minQty: kg(60), sub: 'دهون' });
   const MIN = { 'RM-101': 150, 'RM-102': 100, 'RM-103': 60, 'RM-104': 50, 'RM-105': 150 };
   let rn = 110, fn = 410;
   S.recipes = {};
@@ -1136,7 +1562,7 @@ function masterData() {
     let rawId = null;
     if (group === 'قطعيات' || group === 'قطعيات مميزة') {
       const rc = rawOrFg || 'RM-' + rn++;
-      rawId = I(rc, name + ' (خام)', 'meat', 'kg', price, { minQty: kg(MIN[rc] || 0) }).id;
+      rawId = I(rc, name + ' (خام)', 'meat', 'kg', price, { minQty: kg(MIN[rc] || 0), sub: 'بلدي فريش' }).id;
     }
     const retail = group === 'لحوم باردة' ? price * 4 : price; // website cold-cut price assumed per 250 g pack
     I(code, name, 'product', 'kg', retail, { group, packs: GROUP_PACKS[group], minQty: isMade ? kg(code === 'FG-401' ? 120 : code === 'FG-402' || code === 'FG-403' ? 60 : 40) : 0 });
@@ -1153,8 +1579,11 @@ function masterData() {
   I('SP-209', 'ممبار وأمعاء للسجق', 'spice', 'kg', 0, { vat: 0 });
   I('PK-305', 'كيس فاكيوم نص كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 800, packFor: 500 });
   I('PK-310', 'كيس فاكيوم ١ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 800, packFor: 1000 });
-  I('PK-315', 'كيس فاكيوم ١.٥ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 300, packFor: 1500 });
-  I('PK-320', 'كيس فاكيوم ٢ كيلو', 'pack', 'pc', 0, { vat: 14, minQty: 300, packFor: 2000 });
+  I('PK-315', 'كيس فاكيوم ٢٠٠ جرام', 'pack', 'pc', 0, { minQty: 300, packFor: 200 });
+  I('PK-320', 'كيس فاكيوم ٢٥٠ جرام', 'pack', 'pc', 0, { minQty: 300, packFor: 250 });
+  I('PK-330', 'طبق فوم (وزن مفتوح)', 'pack', 'pc', 0, { minQty: 200 });
+  I('RM-199', 'إعادة تصنيع (عجينة برجر)', 'meat', 'kg', 0, { rework: true, sub: 'إعادة تصنيع' });
+  S.migr = { packs2026: true };
   I('PK-390', 'استيكر بوم ميت', 'pack', 'pc', 0, { vat: 14, minQty: 2000, sticker: true });
   S.items.sort((a, b) => a.code < b.code ? -1 : 1);
 }
@@ -1192,7 +1621,7 @@ function seed() {
   P('s1', 'supplier', 'مزرعة الوادي للمواشي', { phone: '01001234567', supplies: 'لحوم بالعضم', items: ['it_RM-100'] });
   P('s2', 'supplier', 'النيل للحوم المبردة', { phone: '01112345678', supplies: 'قطعيات', items: ['it_RM-101', 'it_RM-102', 'it_RM-105', 'it_RM-106'] });
   P('s3', 'supplier', 'البهارات الذهبية', { phone: '01223456789', supplies: 'توابل وإضافات', items: ['it_SP-201', 'it_SP-202', 'it_SP-203', 'it_SP-204', 'it_SP-205'] });
-  P('s4', 'supplier', 'العبوات الحديثة', { phone: '01534567890', supplies: 'أكياس فاكيوم', items: ['it_PK-305', 'it_PK-310', 'it_PK-315', 'it_PK-320'] });
+  P('s4', 'supplier', 'العبوات الحديثة', { phone: '01534567890', supplies: 'أكياس فاكيوم', items: ['it_PK-305', 'it_PK-310', 'it_PK-315', 'it_PK-320', 'it_PK-330'] });
   P('s5', 'supplier', 'مطبعة الشروق', { phone: '01045678901', supplies: 'استيكرات', items: ['it_PK-390'] });
   P('c1', 'customer', 'جاست سماش', { kind: 'wholesale', terms: 'credit', phone: '01098765432', taxId: '111-222-333' });
   P('c2', 'customer', 'مطعم النخيل', { kind: 'wholesale', terms: 'credit', phone: '01187654321', taxId: '222-333-444' });
@@ -1220,7 +1649,7 @@ function seed() {
     { name: 'تابلت × 3 + كمبيوتر', acc: '1504', value: egp(60000), rate: 33 }] }));
 
   // opening stock for EVERY item (sample): 500 kg of each website product, frozen cuts, spices, packaging
-  as('u1', () => openingBalances({ date: start, stock: S.items.filter(i => !['byproduct', 'carcass'].includes(i.cat)).map(it => {
+  as('u1', () => openingBalances({ date: start, stock: S.items.filter(i => !['byproduct', 'carcass'].includes(i.cat) && !i.rework).map(it => {
     if (it.cat === 'product') { const pk = packsOf(it).includes(1000) ? 1000 : Math.max(...packsOf(it).filter(z => z <= 1000)); return { wh: parseInt(it.code.slice(3), 10) % 2 ? 'W6' : 'W4', itemId: it.id, qty: kg(500), packSize: pk, unitCost: Math.round(it.priceWholesale * 0.7 / 100) * 100, expDate: addDays(start, it.group === 'لحوم باردة' ? 60 : 90) }; }
     if (it.cat === 'meat') return { itemId: it.id, qty: kg(it.id === 'it_RM-106' ? 80 : 250), unitCost: Math.round(it.priceRetail * 0.6 / 100) * 100, expDate: addDays(start, 120), wh: 'W2' };
     if (it.cat === 'spice') return { itemId: it.id, qty: kg(it.code === 'SP-204' ? 300 : 60), unitCost: egp(it.code === 'SP-204' ? 38 : it.code === 'SP-207' ? 8 : 120), expDate: addDays(start, 180), wh: 'W2' };
@@ -1253,7 +1682,7 @@ function seed() {
   const buyPack = date => {
     const d1 = as('u3', () => purchase({ date, supplierId: 's4', ref: 'AB-' + ri(1000, 9999), lines: [
       { itemId: 'it_PK-305', qty: 4000, unitCost: egp(1.8), expDate: addDays(date, 720) }, { itemId: 'it_PK-310', qty: 4000, unitCost: egp(2.4), expDate: addDays(date, 720) },
-      { itemId: 'it_PK-315', qty: 1200, unitCost: egp(2.9), expDate: addDays(date, 720) }, { itemId: 'it_PK-320', qty: 1200, unitCost: egp(3.3), expDate: addDays(date, 720) }] }));
+      { itemId: 'it_PK-315', qty: 1200, unitCost: egp(1.2), expDate: addDays(date, 720) }, { itemId: 'it_PK-320', qty: 1200, unitCost: egp(1.4), expDate: addDays(date, 720) }, { itemId: 'it_PK-330', qty: 600, unitCost: egp(2.5), expDate: addDays(date, 720) }] }));
     const d2 = as('u3', () => purchase({ date, supplierId: 's5', ref: 'SH-' + ri(100, 999), lines: [{ itemId: 'it_PK-390', qty: 10000, unitCost: egp(0.6), expDate: addDays(date, 720) }] }));
     moveAll(date, [...d1.lines, ...d2.lines].map(l => S.lots.find(x => x.id === l.lotId)), 'W3');
   };
@@ -1413,10 +1842,10 @@ function init() { if (!load()) { seed(); save(); } return S; }
 
 root.ERP = {
   init, reset, save, exportJSON, get S() { return S; },
-  ACCOUNTS, LEAF, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
+  ACCOUNTS, LEAF, MEAT_SECTIONS, payLabel, updateAccess, finishMeat, returnRework, batchKg, batchCostNow, running, isOpenWeight, openButchery, butcheryInput, butcheryPack, butcheryOutput, butcheryDropOutput, newCutItem, closeButchery, butIn, butOut, butCost, BASE_ACCOUNTS, DEPOSIT_KINDS, depositSources, moneyKind, methodAcc, methodName, accLabel, staffName, personBalance, deposit, payLiability, advance, advanceBack, custody, settleCustody, saveAccount, deleteAccount, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
-  item, partner, userName, whName, me, available, cashBalance, partnerBalance, partnerStatement, batchById, issuedOf, priceFor, monthlyDepreciation,
-  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
+  item, partner, userName, whName, me, available, cashBalance, invoicePaid, partnerBalance, partnerTotals, partnerStatement, batchById, issuedOf, priceFor, monthlyDepreciation,
+  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderPayLink, orderCardPaid, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
   saveItem, savePartner, resetBooks, updateSelf, saveWarehouse, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
   ledger, bal, trialBalance, incomeStatement, balanceSheet, manufacturingAccount, integrity, stockAlerts, fmtQty, money, accType, debitNature, leafUnder,
 };

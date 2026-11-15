@@ -73,6 +73,7 @@ const MATRIX = { // op: roles allowed (owner always allowed)
   purchase: ['storekeeper', 'accountant'], transfer: ['storekeeper', 'supervisor'], cutting: ['supervisor', 'storekeeper'], createBatch: ['supervisor'], issue: ['worker', 'supervisor'],
   closeBatch: ['supervisor'], invoice: ['sales', 'accountant'], receipt: ['accountant', 'sales'], supplierPayment: ['accountant'], expense: ['accountant'], writeOff: ['storekeeper'],
   saveItem: [], updateSettings: [], decideCorrection: [], resetBooks: [], openingBalances: ['accountant'],
+  deposit: ['accountant'], advance: ['accountant'], custody: ['accountant'], payLiability: [], saveAccount: [],
 };
 const calls = {
   purchase: () => E.purchase({ date: T, supplierId: 's3', ref: 'P', lines: [{ itemId: 'it_SP-201', qty: 1000, unitCost: 100, expDate: E.addDays(T, 9) }] }),
@@ -83,14 +84,19 @@ const calls = {
   closeBatch: () => { const b = E.S.docs.batches[E.S.docs.batches.length - 1]; return E.closeBatch({ batchId: b.id, date: T, packs: { 500: 1 } }); },
   invoice: () => E.invoice({ date: T, customerId: 'c1', lines: [{ productId: 'it_FG-401', packSize: 1000, count: 1 }], method: 'credit' }),
   receipt: () => E.receipt({ date: T, customerId: 'c1', amount: 100, method: 'cash' }),
-  supplierPayment: () => E.supplierPayment({ date: T, supplierId: 's1', amount: 100, method: 'bank' }),
-  expense: () => E.expense({ date: T, acc: '5403', amount: 100, method: 'bank' }),
+  supplierPayment: () => E.supplierPayment({ date: T, supplierId: 's1', amount: 100, method: 'cash' }),
+  expense: () => E.expense({ date: T, acc: '5403', amount: 100, method: 'cash' }),
   writeOff: () => { const l = E.S.lots.find(x => x.qty > 10 && x.cat === 'spice'); return E.writeOff({ date: T, lotId: l.id, qty: 1, reason: 'فحص' }); },
   saveItem: () => { const it = E.item('it_SP-201'); return E.saveItem({ ...it }); },
   updateSettings: () => E.updateSettings({ issueLimitKg: 100, vatRate: 14, telegram: true, company: {} }),
   decideCorrection: () => { const c = E.S.docs.corrections.find(x => x.status === 'pending'); return E.decideCorrection(c.id, false); },
   resetBooks: () => E.resetBooks(),
   openingBalances: () => E.openingBalances({ date: T, cash: 100 }),
+  deposit: () => E.deposit({ date: T, to: 'cash', amount: 100, source: '3301', kind: 'cash', memo: 'فحص' }),
+  advance: () => E.advance({ date: T, name: 'عامل فحص', amount: 100, method: 'cash' }),
+  custody: () => E.custody({ date: T, name: 'سواق فحص', amount: 100, method: 'cash' }),
+  payLiability: () => E.payLiability({ date: T, acc: '2111', from: 'cash', amount: 0, cost: 100 }),
+  saveAccount: () => E.saveAccount({ name: 'مصروف فحص ' + Math.random().toString(36).slice(2, 7), parent: '54' }),
 };
 const roles = ['owner', 'accountant', 'storekeeper', 'supervisor', 'worker', 'sales'];
 let checked = 0;

@@ -6,7 +6,7 @@ import '../_shared/engine.js';
 import { runShop } from '../_shared/core.mjs';
 import { copyText, copyPhoto, VIEWER_NOTE } from '../_shared/viewers.ts';
 import { receiptSvg } from '../_shared/receipt.mjs';
-import { createPayLink } from '../_shared/paymob.ts';
+import { createPayLink, paymobReady } from '../_shared/paymob.ts';
 import { initWasm, Resvg } from 'npm:@resvg/resvg-wasm@2.6.2';
 
 // deno-lint-ignore no-explicit-any
@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     if (body?.action === 'receipt') return await receipt(String(body.id || ''));
     if (body?.action === 'paylink') { const l = await payLink(String(body.id || '')); return json(l.ok ? 200 : 400, l); }
     const r = await runShop({ E, db, action: body?.action, body, telegram, copy: (t: string) => copyText(admin, t) });
+    if (body?.action === 'catalog' && r.status === 200 && r.body?.result) r.body.result.cardPay = paymobReady(); // the bot offers «فيزا أونلاين» only when Paymob is fully set up
     if (body?.action === 'order' && r.status === 200 && r.body?.result?.method === 'card') { // the bot sends this link instead of InstaPay details
       const l = await payLink(r.body.result.id);
       Object.assign(r.body.result, l.ok ? { payUrl: l.url } : { payError: l.error });

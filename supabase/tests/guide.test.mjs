@@ -34,7 +34,7 @@ const ROWS = {
   'بيع وفاتورة': [['owner', 'accountant', 'sales'], () => { const p = prod(); return E.invoice({ date: T, customerId: cust().id, lines: [{ productId: p.id, packSize: 1000, count: 1 }], method: 'cash' }); }],
   'الموافقة على طلبات الواتساب': [['owner', 'accountant', 'sales'], () => { const o = (S().docs.orders || []).find(x => x.status === 'pending' && !x.test); return E.decideOrder({ id: o.id, action: 'reject', reason: 'فحص' }); }],
   'تحصيل من عميل': [['owner', 'accountant', 'sales'], () => E.receipt({ date: T, customerId: cust().id, amount: 100, method: 'cash' })],
-  'سداد مورد': [['owner', 'accountant'], () => E.supplierPayment({ date: T, supplierId: sup().id, amount: 100, method: 'bank' })],
+  'سداد مورد': [['owner', 'accountant'], () => E.supplierPayment({ date: T, supplierId: sup().id, amount: 100, method: 'cash' })],
   'مصروفات': [['owner', 'accountant'], () => E.expense({ date: T, acc: E.EXPENSE_ACCS[0], amount: 100, method: 'cash' })],
   'إعدام كمية بايظة': [['owner', 'storekeeper'], () => E.writeOff({ date: T, lotId: lotRaw().id, qty: 1, reason: 'فحص' })],
   'الأرصدة الافتتاحية': [['owner', 'accountant'], () => E.openingBalances({ date: T, cash: 100 })],
@@ -134,7 +134,7 @@ fresh();
   ok(14, 'العبوات بتدخل الفريزر اللي اتكتب', S().lots.some(l => l.itemId === p.id && l.wh === fg[0] && l.packSize === 500) && S().lots.some(l => l.itemId === p.id && l.wh === fg[1] && l.packSize === 1000));
   ok(14, 'الهدر = اللي اتصرف − اللي طلع', bb.waste === bb.inputKg - bb.output, `${bb.inputKg} − ${bb.output} = ${bb.waste}`);
   ok(14, 'تكلفة الكيلو بتتحسب', bb.costPerKg > 0);
-  ok(14, 'الأحجام ½ و١ و١.٥ و٢ كيلو بس', JSON.stringify(E.PACK_SIZES) === '[500,1000,1500,2000]', JSON.stringify(E.PACK_SIZES));
+  ok(14, 'الأحجام ٢٠٠ و٢٥٠ جرام و½ و١ كيلو + وزن مفتوح', JSON.stringify(E.PACK_SIZES) === '[200,250,500,1000]' && E.isOpenWeight(750) && !E.isOpenWeight(500), JSON.stringify(E.PACK_SIZES));
 }
 
 /* ---------- p15-16: sale: price list by customer kind, can't sell what isn't there, VAT 14% ---------- */
@@ -148,7 +148,7 @@ fresh();
   ok(15, 'مستحيل تبيع أكتر من المتاح في الفريزر', !r.ok, r.msg);
   ok(25, 'رسالة «الكمية المتاحة … بس»', /المتاح|المتاحة/.test(r.msg || ''), r.msg);
   const v = E.invoice({ date: T, customerId: whole.id, lines: [{ productId: p.id, packSize: 1000, count: 1 }], method: 'credit' });
-  ok(16, 'الضريبة ١٤٪', v.vat === Math.round(v.net * 14 / 100), `${v.vat} على ${v.net}`);
+  ok(16, 'من غير ضريبة: الإجمالي = الصافي', v.vat === 0 && v.total === v.net, `${v.vat} على ${v.net}`);
   ok(16, 'الآجل بيتسجل على العميل', E.partnerBalance(whole.id) >= v.total);
   ok(16, 'تكلفة المبيعات بتتسجل', v.cost > 0 || v.lines.some(l => l.cost > 0));
 }
@@ -211,7 +211,7 @@ ok(20, 'حساب التشغيل والمتاجرة مطابق للقيود', E.m
 
 /* ---------- p22: settings + reset keeps what the guide says ---------- */
 fresh();
-ok(22, 'الضريبة الافتراضية ١٤٪', S().settings.vatRate === 14);
+ok(22, 'الضريبة متشالة (٠٪)', S().settings.vatRate === 0);
 {
   as('owner'); const items = S().items.length, users = S().users.length, whs = E.warehouses().length, priced = S().items.map(i => i.priceRetail).join(',');
   E.resetBooks();

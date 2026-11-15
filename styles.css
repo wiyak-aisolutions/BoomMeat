@@ -1068,3 +1068,24 @@ table.t td:has(>.empty),table.t td .empty,.empty{white-space:normal}
 .rcp .eta.note{background:#fff;border:1px dashed #d9d4cc}
 .rcp-f{padding:10px 16px 14px;text-align:center;color:#8a8790;font-size:11px;line-height:1.7}.rcp-f b{color:#1b1a1f}
 .oc-go{display:none!important}@media (min-width:1101px){.oc{grid-template-columns:150px minmax(150px,1fr) minmax(220px,2fr) 150px 170px}}
+/* worker screen: search + meat sections · cart: editable price per kg */
+.wk-filter{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}.wk-filter .f{height:44px;font-size:16px}
+.wk-subs{flex-wrap:wrap}.wk-subs button{min-height:40px;font-size:15px}
+.ci-p{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}.ci-p input{width:86px;height:32px;padding:0 6px;font-size:13px}.ci-p small{white-space:nowrap}
+/* treasury: balances grouped by kind · staff balances */
+.money-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:14px}
+.mrows{display:flex;flex-direction:column;gap:6px}
+.mrow{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--glass2);color:inherit;font:inherit;cursor:pointer;text-align:start}
+.mrow b{white-space:nowrap;font-variant-numeric:tabular-nums}.mrow.on{border-color:var(--red);background:var(--red-soft)}
+.mrow:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.pk-opts{display:flex;flex-wrap:wrap;gap:8px 14px;padding:6px 0}.pk-opts label{display:inline-flex;gap:6px;align-items:center;font-size:14px}
+/* dropdowns: the open list is drawn by the browser, so give it solid colors — a see-through field made dark-mode options light-on-light */
+select,select.f{color:var(--ink)}
+select option,select optgroup{background:#FFFFFF;color:#1B1A1F}
+select option:disabled{color:#8A8790}
+:root[data-theme="dark"] select,:root[data-theme="dark"] select.f{color-scheme:dark;color:var(--ink)}
+:root[data-theme="dark"] select option,:root[data-theme="dark"] select optgroup{background:#1F2133;color:#F3E9DF}
+:root[data-theme="dark"] select option:disabled{color:#8C8FA6}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) select,:root:not([data-theme="light"]) select.f{color-scheme:dark;color:var(--ink)}
+  :root:not([data-theme="light"]) select option,:root:not([data-theme="light"]) select optgroup{background:#1F2133;color:#F3E9DF}
+  :root:not([data-theme="light"]) select option:disabled{color:#8C8FA6}}

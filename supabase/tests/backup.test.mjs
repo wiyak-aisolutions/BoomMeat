@@ -1,0 +1,26 @@
+// Boom Meat ERP — the daily Excel backup: every sheet present, totals right, 11:00 Cairo once a day.
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+const dir = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '');
+globalThis.localStorage = undefined;
+createRequire(import.meta.url)(dir + '/engine.js');
+const E = globalThis.ERP;
+const { backupSheets, backupDue } = await import('../functions/_shared/backup.mjs');
+let pass = 0, fail = 0;
+const ok = (c, cond, d = '') => { if (cond) pass++; else { fail++; console.log('✗ ' + c + (d ? ' — ' + d : '')); } };
+E.reset();
+const sh = backupSheets(E), by = n => sh.find(x => x.name === n);
+ok('all sheets', ['ملخص', 'الخزنة والبنوك', 'العملاء', 'الموردين', 'الفواتير', 'المشتريات', 'المصروفات', 'المخزون', 'التشغيلات', 'الجزارة', 'السلف والعهد', 'القيود', 'ميزان المراجعة'].every(n => by(n)), sh.map(x => x.name).join(','));
+ok('sheet names fit Excel (≤31)', sh.every(x => x.name.length <= 31));
+const inv = by('الفواتير').rows, last = inv[inv.length - 1];
+ok('invoices total row = sum of totals', last[0] === 'الإجمالي' && Math.abs(last[5] - inv.slice(1, -1).reduce((s, r) => s + r[5], 0)) < 0.01);
+ok('invoice total = paid + left', inv.slice(1, -1).every(r => Math.abs(r[5] - r[6] - r[7]) < 0.001));
+const cu = by('العملاء').rows, cuT = cu[cu.length - 1];
+ok('customers owe = books', Math.abs(cuT[4] - E.S.partners.filter(p => p.type === 'customer').reduce((s, p) => s + E.partnerBalance(p.id), 0) / 100) < 0.01);
+const j = by('القيود').rows, jt = j[j.length - 1];
+ok('journal debit = credit', Math.abs(jt[6] - jt[7]) < 0.01 && jt[6] > 0);
+const tb = by('ميزان المراجعة').rows, tbt = tb[tb.length - 1];
+ok('trial balance balanced', Math.abs(tbt[2] - tbt[3]) < 0.01);
+ok('every cell is plain (number/string)', sh.every(x => x.rows.every(r => r.every(c => ['number', 'string'].includes(typeof c)))));
+ok('due at 11:xx once a day', backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-15') && !backupDue({ date: '2026-11-15', time: '10:59' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '12:00' }, ''));
+console.log(`backup checks: ${pass} passed, ${fail} failed`); if (fail) process.exit(1);

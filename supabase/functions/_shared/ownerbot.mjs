@@ -74,9 +74,12 @@ function stock(E, text) {
 }
 
 function cash(E) {
-  const rows = [['1101', 'الخزنة'], ['1102', 'البنك'], ['1103', 'إنستاباي']].map(([c, n]) => [n, E.cashBalance(c)]);
+  // every cash box, bank and wallet that holds money (the two treasuries always), then what we owe on credit cards and loans
+  const accs = E.ACCOUNTS.filter(a => E.LEAF.has(a.code) && a.money);
+  const rows = accs.filter(a => ['cash', 'bank', 'wallet', 'gateway'].includes(a.money)).map(a => [a.name, E.cashBalance(a.code), a.code]).filter(([, v, c]) => v || c === '1101' || c === '1107');
   const total = rows.reduce((s, [, v]) => s + v, 0);
-  return { text: '💰 <b>الفلوس دلوقتي</b>\n\n' + rows.map(([n, v]) => `· ${n}: ${E.money(v)}`).join('\n') + `\n\n<b>الإجمالي: ${E.money(total)}</b>` };
+  const owe = accs.filter(a => ['credit', 'loan'].includes(a.money)).map(a => [a.name, -E.cashBalance(a.code)]).filter(([, v]) => v);
+  return { text: '💰 <b>الفلوس دلوقتي</b>\n\n' + rows.map(([n, v]) => `· ${n}: ${E.money(v)}`).join('\n') + `\n\n<b>الإجمالي: ${E.money(total)}</b>` + (owe.length ? '\n\n<b>علينا</b>\n' + owe.map(([n, v]) => `· ${n}: ${E.money(v)}`).join('\n') : '') };
 }
 
 function sales(E) {
