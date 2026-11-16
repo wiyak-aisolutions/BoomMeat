@@ -24,4 +24,8 @@ ok('trial balance balanced', Math.abs(tbt[2] - tbt[3]) < 0.01);
 ok('every cell is plain (number/string)', sh.every(x => x.rows.every(r => r.every(c => ['number', 'string'].includes(typeof c)))));
 ok('due at 11:xx once a day', backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-15') && !backupDue({ date: '2026-11-15', time: '10:59' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '12:00' }, '2026-11-15'));
 ok('a missed 11:00 is retried later the same day', backupDue({ date: '2026-11-15', time: '12:05' }, '2026-11-14') && backupDue({ date: '2026-11-15', time: '23:05' }, '2026-11-14') && !backupDue({ date: '2026-11-16', time: '00:05' }, '2026-11-15'));
+// the dashboard's «نزّل كل حاجة Excel» button uses a copy inside app.js: it must match this file
+{ const fs = await import('fs'); const app = fs.readFileSync(new URL('../../app.js', import.meta.url), 'utf8'); const mod = fs.readFileSync(new URL('../functions/_shared/backup.mjs', import.meta.url), 'utf8');
+  const copy = (app.split('/* BEGIN backup-sheets')[1] || '').split('window.BOOM_BACKUP')[0];
+  ok('app.js carries the same backup sheets as the server', copy.includes(mod.replace(/^export /gm, '').trim()), 'run the sync in app.js'); }
 console.log(`backup checks: ${pass} passed, ${fail} failed`); if (fail) process.exit(1);
