@@ -67,8 +67,8 @@ PAGES.home = () => {
   const CASH = U.moneyAccs('move'), cashNow = CASH.reduce((a, c) => a + E.bal(L, c), 0);
   const cashDelta = {}; s.journal.forEach(j => j.lines.forEach(l => { if (CASH.includes(l.acc)) cashDelta[j.date] = (cashDelta[j.date] || 0) + l.dr - l.cr; }));
   const cashSeries = []; { let run = cashNow; for (let i = 0; i < 14; i++) { const d = E.addDays(t, -i); cashSeries.unshift(run); run -= cashDelta[d] || 0; } }
-  page('نظرة عامة', `
-    <div class="card hero"><button class="me-btn" data-act="me" aria-label="حسابي">${U.avatar(E.me(), 'hero-av')}</button><div style="min-width:0"><h2>${greet}، ${esc(E.me().name)}</h2><p>${U.dfl(t)}</p>
+  page('الرئيسية', `
+    <div class="card hero"><button class="me-btn" data-act="me" aria-label="حسابي">${U.avatar(E.me(), 'hero-av')}</button><div style="min-width:0"><h2>${greet}، ${esc(E.me().name)}</h2><p>${esc(E.ROLES[E.me().role].name)}</p>
       <div class="chips"><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
       ${U.isOwner() ? `<span data-go="reports" class="pill ${allOk ? 'ok' : 'bad'}" role="button" tabindex="0" style="cursor:pointer">${allOk ? '✓ الحسابات متوازنة والمخزون مطابق' : '✗ فيه فرق في الحسابات'}</span>` : ''}</div>
     ${quick.length ? `<div class="qas">${quick.map((q, i) => `<button class="qa ${i % 2 ? 'y' : ''}" data-act="quick" data-arg="${q[0]}"><i>${ic(q[3])}</i><span><b>${q[1]}</b><small>${q[2]}</small></span></button>`).join('')}</div>` : ''}
@@ -121,7 +121,7 @@ PAGES.flow = () => {
     st('suppliers', 'الموردين', `${s.partners.filter(p => p.type === 'supplier').length} مورد`, 'لحوم · توابل · أكياس · استيكرات', 'مستحق لهم: ' + fm0(E.bal(L, '2101')) + ' ج', 'المحاسب'),
     st('purchases', 'الاستلام بالباركود', `${pM.length} فاتورة`, `الشهر ده · ${fm0(sumBy(pM, p => p.total))} ج`, 'من: المخزون · إلى: المورد', 'أمين المخزن'),
     st('stock', 'مخزن الاستلام', `${kgf(kgOf(whAll('receiving')))} كجم`, 'كل دفعة: إنتاج · دخول · صلاحية', '', 'أمين المخزن'),
-    st('cutting', 'التقطيع', `${cM.length} عملية`, `الشهر ده · هدر ${kgf(sumBy(cM, c => c.waste))} كجم`, 'التكلفة تتوزع بالقيمة البيعية', 'مشرف الإنتاج'),
+    st('cutting', 'الجزارة', `${cM.length} عملية`, `الشهر ده · هدر ${kgf(sumBy(cM, c => c.waste))} كجم`, 'التكلفة تتوزع بالقيمة البيعية', 'مشرف الإنتاج'),
     st('stock', `تلاجات الإنتاج (${E.whs('raw').length})`, `${kgf(kgOf(whAll('raw')))} كجم`, cost ? `قيمتها ${fm0(vOf(whAll('raw')))} ج` : 'لحوم وتوابل', '', 'أمين المخزن'),
     st('worker', 'الصرف على التشغيلة', `${bOpen.length} جارية`, `حد التنبيه ${s.settings.issueLimitKg} كجم للصنف`, 'من: تحت التشغيل · إلى: الخامات', 'العامل من التابلت'),
     st('batches', 'قفل التشغيلة والتعبئة', `${bM.length} تشغيلة`, `الشهر ده · ${kgf(sumBy(bM, b => b.output))} كجم`, 'من: المنتج التام · إلى: تحت التشغيل', 'مشرف الإنتاج'),
@@ -239,7 +239,7 @@ PAGES.batch = id => {
       ${isOwner() ? `<div class="bar" style="margin-top:8px"><button class="btn sm ok" data-act="corr-ok" data-arg="${c.id}">موافقة</button><button class="btn sm dan" data-act="corr-no" data-arg="${c.id}">رفض</button><span class="crumb">الموافقة بتعكس السطر الأصلي وتسجل الكمية الصح، والسطر الأصلي بيفضل ظاهر.</span></div>` : '<div class="crumb">مستني موافقة المالك</div>'}</div>`).join('')}
     <div class="card"><div class="bd"><div class="kv">
       <div><span>المنتج</span><b>${esc(p.name)}</b></div><div><span>التاريخ</span><b>${df(b.date)}</b></div><div><span>المخطط</span><b>${kgf(b.planned)} كجم</b></div>
-      <div><span>فتحها</span><b>${esc(E.userName(b.openedBy))}</b></div>${b.status === 'closed' ? `<div><span>قفلها</span><b>${esc(E.userName(b.closedBy))} · ${tf(b.closedAt)}</b></div>` : ''}</div>
+      <div><span>فتحها</span><b>${esc(E.userName(b.openedBy))}</b></div>${b.noSpice ? '<div><span>التوابل</span><b>بدون توابل</b></div>' : ''}${b.status === 'closed' ? `<div><span>قفلها</span><b>${esc(E.userName(b.closedBy))} · ${tf(b.closedAt)}</b></div>` : ''}</div>
       <div class="smart" style="margin-top:14px">
         <div><small>الخامات المصروفة${(b.returns || []).length ? ' (بعد إعادة التصنيع)' : ''}</small><b>${kgf(b.status === 'closed' ? b.inputKg : inKg)} كجم</b></div>
         <div><small>الناتج</small><b>${b.status === 'closed' ? kgf(b.output) + ' كجم' : '—'}</b></div>
@@ -312,7 +312,10 @@ const WK = { batch: null, item: null, qty: '', cat: 'meat', sub: '', q: '' };
 PAGES.worker = () => {
   const s = S(), r = U.role();
   // the meat worker sees batches still at the meat stage; the dry (packing) worker sees batches handed to packing; the supervisor sees both
-  const stageOk = x => r === 'worker' ? x.status === 'open' : r === 'packer' ? x.status === 'packing' : E.running(x);
+  // the owner and the supervisor switch between the two workers' views
+  const both = !['worker', 'packer'].includes(r); if (!WK.view) WK.view = 'meat';
+  const stage = r === 'worker' ? 'open' : r === 'packer' ? 'packing' : WK.view === 'pack' ? 'packing' : 'open';
+  const stageOk = x => x.status === stage;
   const open = s.docs.batches.filter(stageOk);
   if (WK.batch && !open.some(x => x.id === WK.batch)) { WK.batch = null; WK.item = null; }
   if (!WK.batch && open.length === 1) WK.batch = open[0].id;
@@ -358,13 +361,15 @@ PAGES.worker = () => {
       b.issues.filter(i => (E.item(i.itemId).cat === 'pack') === packing).slice().reverse().map(i => ({ ...i, _cls: i.reversed ? 'muted' : '' })), { empty: 'لسه مفيش صرف' })}</div></div>`;
   }
   const kgIn = x => sumBy(x.issues.filter(i => !i.reversed && E.item(i.itemId).cat !== 'pack'), i => i.qty);
-  page('شاشة العامل', `<div class="wk">
-    <div class="card"><div class="hd"><h3>١. اختار التشغيلة</h3>${r === 'packer' ? '<span class="sub">اللي عامل اللحوم خلّصها</span>' : ''}</div><div class="bd">${open.length ? `<div class="wk-batches">${open.map(x => `<button class="wk-b ${WK.batch === x.id ? 'on' : ''}" data-act="wk-batch" data-arg="${x.id}"><span class="mono">${esc(x.no)}${x.status === 'packing' ? ' · تقفيل' : ''}</span><b>${esc(E.item(x.productId).name)}</b><small>مخطط ${kgf(x.planned)} كجم · اتصرف ${kgf(kgIn(x))} كجم</small></button>`).join('')}</div>` : `<div class="empty">${r === 'packer' ? 'مفيش تشغيلة مستنية تقفيل دلوقتي.' : 'مفيش تشغيلة مفتوحة. المشرف يفتح تشغيلة الأول.'}</div>`}</div></div>
+  const views = both ? `<div class="bar"><div class="seg wk-views"><button class="${WK.view === 'meat' ? 'on' : ''}" data-act="wk-view" data-arg="meat">عامل اللحوم <small>(${s.docs.batches.filter(x => x.status === 'open').length})</small></button><button class="${WK.view === 'pack' ? 'on' : ''}" data-act="wk-view" data-arg="pack">عامل التقفيل <small>(${s.docs.batches.filter(x => x.status === 'packing').length})</small></button></div></div>` : '';
+  page('شاشة العامل', `${views}<div class="wk">
+    <div class="card"><div class="hd"><h3>١. اختار التشغيلة</h3>${r === 'packer' ? '<span class="sub">اللي عامل اللحوم خلّصها</span>' : ''}</div><div class="bd">${open.length ? `<div class="wk-batches">${open.map(x => `<button class="wk-b ${WK.batch === x.id ? 'on' : ''}" data-act="wk-batch" data-arg="${x.id}"><span class="mono">${esc(x.no)}${x.status === 'packing' ? ' · تقفيل' : ''}</span><b>${esc(E.item(x.productId).name)}</b><small>مخطط ${kgf(x.planned)} كجم · اتصرف ${kgf(kgIn(x))} كجم</small></button>`).join('')}</div>` : `<div class="empty">${stage === 'packing' ? 'مفيش تشغيلة مستنية تقفيل دلوقتي.' : 'مفيش تشغيلة مفتوحة. المشرف يفتح تشغيلة الأول.'}</div>`}</div></div>
     ${right}</div>`, { crumb: esc(E.me().name) });
   const wq = document.getElementById('wk-q'); let tq;
   if (wq) wq.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { WK.q = e.target.value; WK.item = null; WK.qty = ''; U.render(); const n = document.getElementById('wk-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
 };
-ACTS['wk-done'] = id => { const b = E.batchById(id); modal('تحويل للتقفيل', `<div style="font-size:17px">التشغيلة <b>${esc(b.no)}</b> هتتحول لعامل التقفيل، ومش هينفع تصرف عليها لحوم أو توابل تاني.</div>`, { saveText: 'أيوه، ابعتها', save: async () => { await E.finishMeat({ batchId: id }); toast(`${b.no} اتحولت للتقفيل`, 'ok'); WK.batch = null; } }); };
+ACTS['wk-done'] = id => { const b = E.batchById(id), spiced = b.issues.some(i => !i.reversed && E.item(i.itemId).cat === 'spice'); modal('تحويل للتقفيل', `<div style="font-size:17px">التشغيلة <b>${esc(b.no)}</b> هتتحول لعامل التقفيل، ومش هينفع تصرف عليها لحوم أو توابل تاني.</div>${spiced ? '' : '<div class="note info">مفيش توابل اتصرفت على التشغيلة دي. لو المنتج ده بيتعمل <b>بدون توابل</b> كمّل عادي، وهتتسجل «بدون توابل».</div>'}`, { saveText: spiced ? 'أيوه، ابعتها' : 'كمّل بدون توابل', save: async () => { await E.finishMeat({ batchId: id, noSpice: !spiced }); toast(`${b.no} اتحولت للتقفيل`, 'ok'); WK.batch = null; } }); };
+ACTS['wk-view'] = v => { WK.view = v; WK.batch = null; WK.item = null; WK.qty = ''; U.render(); };
 ACTS['wk-batch'] = id => { WK.batch = id; WK.item = null; WK.qty = ''; U.render(); };
 ACTS['wk-cat'] = c => { WK.cat = c; WK.sub = ''; WK.item = null; WK.qty = ''; U.render(); };
 ACTS['wk-sub'] = x => { WK.sub = x || ''; WK.item = null; WK.qty = ''; U.render(); };
@@ -398,12 +403,12 @@ PAGES.cutting = () => {
   }
   page('تشغيلات الجزارة', `<div class="bar">${tb.html}</div>${body}`);
 };
-const calfLots = () => S().lots.filter(l => E.item(l.itemId).cat === 'carcass' && l.qty > 0);
+const calfLots = () => S().lots.filter(l => ['carcass', 'meat', 'byproduct'].includes(E.item(l.itemId).cat) && !E.item(l.itemId).rework && l.qty > 0 && ['raw', 'receiving'].includes(E.whUse(l.wh))).sort((a, b) => (E.item(a.itemId).cat === 'carcass' ? 0 : 1) - (E.item(b.itemId).cat === 'carcass' ? 0 : 1));
 ACTS['bu-new'] = () => {
   const lots = calfLots();
-  if (!lots.length) { toast('مفيش لحم بالعضم (عجل/ربع) في المخزن. استلمه من المورد الأول', 'bad'); return; }
-  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>العجل / الدفعة</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}">${esc(l.code)} · ${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم · ${esc(E.whName(l.wh))}</option>`).join('')}</select></label>
-    <label class="fld"><span>وزن العجل الداخل (كجم)</span><input class="f" id="bn-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label>
+  if (!lots.length) { toast('مفيش لحمة خام في التلاجات أو مخزن الاستلام', 'bad'); return; }
+  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>الخامة (عجل، صرة بالعضم…)</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}">${esc(l.code)} · ${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم · ${esc(E.whName(l.wh))}</option>`).join('')}</select></label>
+    <label class="fld"><span>الوزن الداخل (كجم)</span><input class="f" id="bn-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label>
     <label class="fld"><span>التاريخ</span><input class="f" id="bn-d" type="date" value="${E.today()}" max="${E.today()}"></label>
     <label class="fld"><span>ملاحظة (الجهة / المعلم)</span><input class="f" id="bn-n"></label></div>`,
   { saveText: 'فتح التشغيلة', save: async () => { const r = await E.openButchery({ date: val('bn-d'), lotId: val('bn-l'), qty: toG(val('bn-q')), note: val('bn-n') }); toast(`اتفتحت ${r.no}`, 'ok'); setTimeout(() => U.go('butchery', r.id)); } });
@@ -413,8 +418,10 @@ PAGES.butchery = id => {
   const s = S(), r = (s.docs.butcheries || []).find(x => x.id === id); if (!r) { U.go('cutting'); return; }
   const cost = canCost(), can = ['owner', 'supervisor', 'storekeeper'].includes(U.role()) && r.status === 'open';
   const inKg = E.butIn(r), outKg = E.butOut(r), loss = inKg - outKg;
-  const outs = s.items.filter(i => (i.cat === 'meat' || i.cat === 'byproduct') && !i.rework && i.active !== false);
+  const outs = s.items.filter(i => ((i.cat === 'meat' || i.cat === 'byproduct') && !i.rework || (i.cat === 'product' && i.group !== 'مصنعات')) && i.active !== false);
   const q = BU.q.trim(), shown = outs.filter(i => !q || i.name.includes(q) || i.code.toLowerCase().includes(q.toLowerCase()));
+  if (!shown.some(i => i.id === BU.item)) BU.item = (shown.find(i => i.cat !== 'product') || shown[0] || {}).id || '';
+  const selIt = BU.item && E.item(BU.item); if (selIt && selIt.cat === 'product') BU.mode = 'n';
   const lineName = o => `${esc(E.item(o.itemId).name)}${o.count ? ` <small>(${o.count} × ${packName(o.packSize)})</small>` : ''}`;
   page(`${esc(r.no)} · تشغيلة جزارة`, `<div class="sheet">
     <div class="sheet-hd no-print"><div class="statusbar"><span class="${r.status === 'open' ? 'on' : ''}">شغالة</span><span class="${r.status === 'closed' ? 'on' : ''}">مقفولة</span></div><span class="grow" style="flex:1"></span>
@@ -424,17 +431,17 @@ PAGES.butchery = id => {
       <div><small>الفقد</small><b style="color:var(--${loss < 0 ? 'bad' : 'ink'})">${kgf(loss)} كجم · ${pct(loss, inKg)}</b></div>${cost ? `<div><small>التكلفة (عجل + أكياس)</small><b>${fm(E.butCost(r))} ج</b></div>` : ''}</div>
     ${can ? `<div class="card no-print"><div class="hd"><h3>إضافة ناتج</h3><span class="sub">بالوزن، أو بالعدد × وزن الحتة (زي ½ كيلو)</span></div><div class="bd">
       <div class="bar"><input class="f" id="bu-q" type="search" placeholder="ابحث في الأصناف" value="${esc(BU.q)}" style="max-width:260px"><span class="grow"></span><button class="btn sm" data-act="bu-newitem">${ic('plus')} صنف جديد</button></div>
-      <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bo-i">${shown.map(i => `<option value="${i.id}" ${BU.item === i.id ? 'selected' : ''}>${esc(i.name)}${i.cat === 'byproduct' ? ' (ناتج)' : ''}</option>`).join('')}</select></label>
-        <label class="fld"><span>الطريقة</span><select class="f" id="bo-m"><option value="kg" ${BU.mode === 'kg' ? 'selected' : ''}>بالوزن (كجم)</option><option value="n" ${BU.mode === 'n' ? 'selected' : ''}>بالعدد</option></select></label>
-        ${BU.mode === 'kg' ? '<label class="fld"><span>الوزن (كجم)</span><input class="f" id="bo-q" type="number" min="0" step="0.01"></label>' : `<label class="fld"><span>العدد</span><input class="f" id="bo-c" type="number" min="1" step="1"></label><label class="fld"><span>وزن الحتة</span><select class="f" id="bo-z">${E.PACK_SIZES.map(z => `<option value="${z}" ${z === 500 ? 'selected' : ''}>${packName(z)}</option>`).join('')}</select></label>`}
+      <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bo-i">${[['meat', 'قطعيات ولحوم خام'], ['byproduct', 'نواتج (عضم، دهن…)'], ['product', 'منتجات جاهزة للبيع (بتدخل الفريزر)']].map(([c, t]) => { const l = shown.filter(i => i.cat === c); return l.length ? `<optgroup label="${t}">${l.map(i => `<option value="${i.id}" ${BU.item === i.id ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}</optgroup>` : ''; }).join('')}</select></label>
+        <label class="fld"><span>الطريقة</span><select class="f" id="bo-m"><option value="kg" ${BU.mode === 'kg' ? 'selected' : ''} ${selIt && selIt.cat === 'product' ? 'disabled' : ''}>بالوزن (كجم)</option><option value="n" ${BU.mode === 'n' ? 'selected' : ''}>بالعدد</option></select></label>
+        ${BU.mode === 'kg' ? '<label class="fld"><span>الوزن (كجم)</span><input class="f" id="bo-q" type="number" min="0" step="0.01"></label>' : `<label class="fld"><span>العدد</span><input class="f" id="bo-c" type="number" min="1" step="1"></label><label class="fld"><span>وزن الحتة</span><select class="f" id="bo-z">${(selIt && selIt.cat === 'product' ? E.packsOf(selIt) : E.PACK_SIZES).map(z => `<option value="${z}" ${z === 500 ? 'selected' : ''}>${packName(z)}</option>`).join('')}</select></label>`}
         <label class="fld"><span>ملاحظة</span><input class="f" id="bo-n"></label></div>
       <div class="bar"><span class="grow"></span><button class="btn p" data-act="bu-add" data-arg="${r.id}">${ic('plus')} أضف السطر</button></div></div></div>` : ''}
     <div class="inv bu-doc">
       <div class="inv-h"><div><img src="boom-logo.png" alt="Boom Meat"></div><div class="r"><b style="font-size:20px">إذن إضافة منتج خام</b><div>رقم: <span class="mono">${esc(r.no)}</span></div><div>التاريخ: ${esc(r.closeDate || r.date)}</div>${r.note ? `<div>الجهة: ${esc(r.note)}</div>` : ''}</div></div>
-      <div class="inv-m"><div><small>الداخل</small>${r.inputs.map(i => `${esc(E.item(i.itemId).name)} · ${kgf(i.qty)} كجم <span class="mono">(${esc(i.code)})</span>`).join('<br>')}</div>
-        <div><small>الأكياس</small>${r.packs.length ? r.packs.map(p_ => `${esc(E.item(p_.itemId).name)} × ${p_.qty}`).join('<br>') : '—'}</div></div>
+      <div class="inv-m"><div><small>الداخل</small>${r.inputs.map(i => `${esc(E.item(i.itemId).name)} · ${kgf(i.qty)} كجم <span class="mono">(${esc(i.code)})</span>${can && r.inputs.length > 1 ? ` <button class="btn sm dan no-print" data-act="bu-indrop" data-arg="${r.id}|${i.id}" aria-label="شيل الدفعة دي">✕</button>` : ''}`).join('<br>')}</div>
+        <div><small>الأكياس</small>${r.packs.length ? r.packs.map(p_ => `${esc(E.item(p_.itemId).name)} × ${p_.qty}${can ? ` <button class="btn sm dan no-print" data-act="bu-pkdrop" data-arg="${r.id}|${p_.id}" aria-label="رجّع الأكياس دي">✕</button>` : ''}`).join('<br>') : '—'}</div></div>
       <table><thead><tr><th>م</th><th>الصنف</th><th>الوحدة</th><th class="n">الكمية</th>${cost && r.status === 'closed' ? '<th class="n">التكلفة</th>' : ''}<th>ملاحظات</th>${can ? '<th class="no-print"></th>' : ''}</tr></thead>
-        <tbody>${r.outputs.map((o, k) => `<tr><td>${k + 1}</td><td>${lineName(o)}</td><td>${o.count ? 'عدد' : 'كجم'}</td><td class="n">${o.count ? `${o.count} <small>(${kgf(o.qty)} كجم)</small>` : kgf(o.qty)}</td>${cost && r.status === 'closed' ? `<td class="n">${fm(o.value)}</td>` : ''}<td>${esc(o.note || '')}${o.lotCode ? ` <span class="mono">${esc(o.lotCode)}</span>` : ''}</td>${can ? `<td class="no-print"><button class="btn sm dan" data-act="bu-drop" data-arg="${r.id}|${o.id}" aria-label="شيل السطر">✕</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="6"><div class="empty">لسه مفيش ناتج</div></td></tr>`}
+        <tbody>${r.outputs.map((o, k) => `<tr><td>${k + 1}</td><td>${lineName(o)}</td><td>${o.count ? 'عدد' : 'كجم'}</td><td class="n">${o.count ? `${o.count} <small>(${kgf(o.qty)} كجم)</small>` : kgf(o.qty)}</td>${cost && r.status === 'closed' ? `<td class="n">${fm(o.value)}</td>` : ''}<td>${esc(o.note || '')}${o.lotCode ? ` <span class="mono">${esc(o.lotCode)}</span>` : ''}</td>${can ? `<td class="no-print" style="white-space:nowrap"><button class="btn sm" data-act="bu-edit" data-arg="${r.id}|${o.id}">تعديل</button> <button class="btn sm dan" data-act="bu-drop" data-arg="${r.id}|${o.id}" aria-label="شيل السطر">✕</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="6"><div class="empty">لسه مفيش ناتج</div></td></tr>`}
           <tr class="tot"><td colspan="3">الإجمالي</td><td class="n">${kgf(outKg)} كجم</td>${cost && r.status === 'closed' ? `<td class="n">${fm(E.butCost(r))}</td>` : ''}<td>الداخل ${kgf(inKg)} كجم · الفقد ${kgf(loss)} كجم (${pct(loss, inKg)})</td>${can ? '<td class="no-print"></td>' : ''}</tr></tbody></table>
       <div style="display:flex;gap:40px;font-size:12.5px;color:#666;padding-top:18px"><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">المسئول</span><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">المستلم</span></div>
     </div>
@@ -442,7 +449,7 @@ PAGES.butchery = id => {
   const bq = document.getElementById('bu-q'); let t;
   if (bq) bq.oninput = e => { clearTimeout(t); t = setTimeout(() => { BU.q = e.target.value; U.render(); const n = document.getElementById('bu-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   const bm = document.getElementById('bo-m'); if (bm) bm.onchange = e => { BU.mode = e.target.value; BU.item = val('bo-i'); U.render(); };
-  const bi = document.getElementById('bo-i'); if (bi) bi.onchange = e => { BU.item = e.target.value; };
+  const bi = document.getElementById('bo-i'); if (bi) bi.onchange = e => { BU.item = e.target.value; const it = E.item(BU.item); if (it.cat === 'product' || (BU.mode === 'n' && it.cat !== 'product')) U.render(); };
 };
 ACTS['bu-add'] = async id => {
   const n = BU.mode === 'n';
@@ -450,7 +457,7 @@ ACTS['bu-add'] = async id => {
   if (ok) BU.item = '';
 };
 ACTS['bu-drop'] = arg => { const [id, lineId] = arg.split('|'); run(() => E.butcheryDropOutput({ id, lineId }), 'اتشال السطر'); };
-ACTS['bu-in'] = id => { const lots = calfLots(); if (!lots.length) { toast('مفيش لحم بالعضم تاني في المخزن', 'bad'); return; }
+ACTS['bu-in'] = id => { const lots = calfLots(); if (!lots.length) { toast('مفيش لحمة خام تانية في المخزن', 'bad'); return; }
   modal('عجل / دفعة تانية على نفس التشغيلة', `<div class="fgrid"><label class="fld"><span>الدفعة</span><select class="f" id="bi-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}">${esc(l.code)} · ${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم</option>`).join('')}</select></label><label class="fld"><span>الوزن (كجم)</span><input class="f" id="bi-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label></div>`,
   { saveText: 'إضافة', save: async () => { await E.butcheryInput({ id, lotId: val('bi-l'), qty: toG(val('bi-q')) }); toast('اتضاف', 'ok'); } });
   document.getElementById('bi-l').onchange = e => { document.getElementById('bi-q').value = e.target.selectedOptions[0].dataset.q / 1000; }; };
@@ -463,13 +470,18 @@ ACTS['bu-newitem'] = () => modal('صنف جديد من الجزارة', `<div cl
   <label class="fld"><span>القسم في شاشة العامل</span><input class="f" id="ni2-s" list="ni2-sl" placeholder="بلدي فريش، برازيلي، دهون…"><datalist id="ni2-sl">${E.MEAT_SECTIONS.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label></div>
   <div class="crumb">سعر البيع بيستخدم بس في توزيع تكلفة العجل على القطعيات. المالك يقدر يعدّله من «الأصناف والأسعار».</div>`,
   { saveText: 'إضافة الصنف', save: async () => { const it = await E.newCutItem({ name: val('ni2-n'), cat: val('ni2-c'), sub: val('ni2-s'), priceRetail: toP(val('ni2-p') || '0') || 0 }); BU.item = it.id; BU.q = ''; toast(`اتضاف ${it.name}`, 'ok'); } });
+ACTS['bu-edit'] = arg => { const [id, lineId] = arg.split('|'); const o = S().docs.butcheries.find(x => x.id === id).outputs.find(x => x.id === lineId), it = E.item(o.itemId);
+  modal('تعديل سطر ' + esc(it.name), `<div class="fgrid">${o.count ? `<label class="fld"><span>العدد</span><input class="f" id="be-c" type="number" min="1" step="1" value="${o.count}"></label><label class="fld"><span>وزن الحتة</span><select class="f" id="be-z">${(it.cat === 'product' ? E.packsOf(it) : E.PACK_SIZES).map(z => `<option value="${z}" ${z === o.packSize ? 'selected' : ''}>${packName(z)}</option>`).join('')}</select></label>` : `<label class="fld"><span>الوزن (كجم)</span><input class="f" id="be-q" type="number" min="0" step="0.01" value="${o.qty / 1000}"></label>`}<label class="fld"><span>ملاحظة</span><input class="f" id="be-n" value="${esc(o.note || '')}"></label></div>`,
+  { saveText: 'حفظ', save: async () => { await E.butcheryEditOutput({ id, lineId, qty: o.count ? null : toG(val('be-q')), count: o.count ? toI(val('be-c')) : null, packSize: o.count ? toI(val('be-z')) : null, note: val('be-n') }); toast('اتعدل السطر', 'ok'); } }); };
+ACTS['bu-indrop'] = arg => { const [id, inputId] = arg.split('|'); modal('شيل دفعة من التشغيلة', '<p>الدفعة دي هترجع المخزن بنفس وزنها وقيمتها. متأكد؟</p>', { saveText: 'أيوه، رجّعها', save: async () => { await E.butcheryDropInput({ id, inputId }); toast('رجعت المخزن', 'ok'); } }); };
+ACTS['bu-pkdrop'] = arg => { const [id, packId] = arg.split('|'); run(() => E.butcheryDropPack({ id, packId }), 'رجعت الأكياس'); };
 ACTS['bu-close'] = id => {
   const r = S().docs.butcheries.find(x => x.id === id), inKg = E.butIn(r), outKg = E.butOut(r);
-  const rw = E.warehouses().filter(w => ['raw', 'receiving'].includes(w.use));
+  const rw = E.warehouses().filter(w => ['raw', 'receiving'].includes(w.use)), hasP = r.outputs.some(o => E.item(o.itemId).cat === 'product'), fz = E.warehouses().filter(w => w.use === 'fg');
   modal(`قفل ${esc(r.no)}`, `<div class="smart"><div><small>الداخل</small><b>${kgf(inKg)} كجم</b></div><div><small>الناتج</small><b>${kgf(outKg)} كجم</b></div><div><small>الفقد</small><b>${kgf(inKg - outKg)} كجم · ${pct(inKg - outKg, inKg)}</b></div></div>
     <div class="note">بعد القفل الناتج بيدخل المخزن كدفعات بباركود، وتكلفة العجل والأكياس بتتوزع عليه. مينفعش تعدّل بعد كده.</div>
-    <div class="fgrid"><label class="fld"><span>الناتج يدخل</span><select class="f" id="bc-w">${rw.map(w => `<option value="${w.id}" ${w.id === r.inputs[0].wh ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></label><label class="fld"><span>تاريخ القفل</span><input class="f" id="bc-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>`,
-  { saveText: 'قفل التشغيلة', save: async () => { const x = await E.closeButchery({ id, date: val('bc-d'), wh: val('bc-w') }); toast(`اتقفلت ${x.no}: فقد ${kgf(x.loss)} كجم`, 'ok'); } });
+    <div class="fgrid"><label class="fld"><span>الناتج يدخل</span><select class="f" id="bc-w">${rw.map(w => `<option value="${w.id}" ${w.id === r.inputs[0].wh ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select></label>${hasP ? `<label class="fld"><span>المنتجات الجاهزة تدخل</span><select class="f" id="bc-f">${fz.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('')}</select></label>` : ''}<label class="fld"><span>تاريخ القفل</span><input class="f" id="bc-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>`,
+  { saveText: 'قفل التشغيلة', save: async () => { const x = await E.closeButchery({ id, date: val('bc-d'), wh: val('bc-w'), fgWh: hasP ? val('bc-f') : undefined }); toast(`اتقفلت ${x.no}: فقد ${kgf(x.loss)} كجم`, 'ok'); } });
 };
 
 /* ========== PRODUCTS (finished goods we hold, by freezer) ========== */
@@ -605,17 +617,32 @@ PAGES.purchase = id => {
   const lots = p.lines.map(l => S().lots.find(x => x.id === l.lotId));
   page(`${esc(p.no)} · ${esc(E.partner(p.supplierId).name)}`, `<div class="sheet">
     <div class="card"><div class="bd"><div class="kv"><div><span>المورد</span><b><a href="#supplier/${p.supplierId}">${esc(E.partner(p.supplierId).name)}</a></b></div><div><span>فاتورة المورد</span><b class="mono">${esc(p.ref)}</b></div><div><span>التاريخ</span><b>${df(p.date)}</b></div><div><span>استلم</span><b>${esc(E.userName(p.by))}</b></div><div><span>القيد</span><b class="mono">${esc(p.je)}</b></div></div></div></div>
+    ${['owner', 'storekeeper', 'accountant'].includes(U.role()) ? `<div class="bar no-print"><span class="grow"></span><button class="btn" data-act="po-edit" data-arg="${p.id}">تعديل الكميات أو الأسعار</button><button class="btn" data-act="print">${ic('print')} طباعة</button></div>` : ''}
     <div class="card"><div class="bd">${table('pol', [{ t: 'الصنف', f: l => esc(E.item(l.itemId).name) }, { t: 'الدفعة', f: l => `<span class="mono">${esc(l.lotCode)}</span>` }, { t: 'الكمية', n: 1, f: l => qtyf(l.qty, E.item(l.itemId).unit) }, { t: 'السعر', n: 1, f: l => fm(l.unitCost) }, { t: 'القيمة', n: 1, f: l => fm(l.value) }, ...(p.vat ? [{ t: 'الضريبة', n: 1, f: l => fm(l.vat) }] : []), { t: 'إنتاج', f: l => df(l.prodDate) }, { t: 'صلاحية', f: l => df(l.expDate) }], p.lines,
       { foot: `<tr class="tot"><td colspan="4">الإجمالي</td><td class="n">${fm(p.net)}</td>${p.vat ? `<td class="n">${fm(p.vat)}</td><td colspan="2" class="n">${fm(p.total)}</td>` : '<td colspan="2"></td>'}</tr>` })}</div></div>
+    ${(p.edits || []).length ? `<div class="card"><div class="hd"><h3>التعديلات</h3></div><div class="bd">${table('poe-' + p.id, [{ t: 'الوقت', f: e => tf(e.at) }, { t: 'الصنف', f: e => esc(E.item(p.lines[e.line].itemId).name) }, { t: 'قبل', n: 1, f: e => `${qtyf(e.from.qty, E.item(p.lines[e.line].itemId).unit)} × ${fm(e.from.unitCost)}` }, { t: 'بعد', n: 1, f: e => `<b>${qtyf(e.to.qty, E.item(p.lines[e.line].itemId).unit)} × ${fm(e.to.unitCost)}</b>` }, { t: 'بواسطة', f: e => esc(E.userName(e.by)) }, { t: 'السبب', f: e => esc(e.reason || '') }], p.edits.slice().reverse())}</div></div>` : ''}
     <div class="card"><div class="hd"><h3>ملصقات الباركود</h3><div class="tools"><button class="btn" data-act="lbl-all" data-arg="${p.id}">${ic('print')} اطبع كل الملصقات</button></div></div><div class="bd"><div class="labels">${lots.map(l => labelHtml(l, true)).join('')}</div></div></div></div>`, { crumb: '<a href="#purchases">المشتريات</a> / ' + esc(p.no) });
 };
+ACTS['po-edit'] = id => {
+  const p = S().docs.purchases.find(x => x.id === id), own = U.isOwner();
+  modal('تعديل استلام ' + esc(p.no), `${own ? '<div class="note">إنت المالك: التعديل هيتنفذ على طول، والمخزن وحساب المورد بيتظبطوا، ويتسجل في سجل الحركات. متأكد؟</div>' : '<div class="note info">التعديل هيتبعت للمالك يوافق عليه (من السيستم أو تليجرام).</div>'}
+    <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="pe-l">${p.lines.map((l, k) => `<option value="${k}">${esc(E.item(l.itemId).name)} · ${qtyf(l.qty, E.item(l.itemId).unit)} × ${fm(l.unitCost)}</option>`).join('')}</select></label>
+      <label class="fld"><span>الكمية الصح</span><input class="f" id="pe-q" type="number" min="0" step="0.001" value="${p.lines[0].qty / (E.item(p.lines[0].itemId).unit === 'kg' ? 1000 : 1)}"></label>
+      <label class="fld"><span>السعر للوحدة (ج)</span><input class="f" id="pe-c" type="number" min="0" step="0.01" value="${p.lines[0].unitCost / 100}"></label></div>
+    <label class="fld"><span>السبب${own ? ' (اختياري)' : ''}</span><input class="f" id="pe-r" placeholder="مثلًا: الوزن الصح ١٩ كيلو"></label>`,
+  { saveText: own ? 'تأكيد التعديل' : 'ابعت للمالك', save: async () => {
+    const k = toI(val('pe-l')), it = E.item(p.lines[k].itemId);
+    const r = await E.editPurchaseLine({ purchaseId: id, line: k, qty: it.unit === 'kg' ? toG(val('pe-q')) : toI(val('pe-q')), unitCost: toP(val('pe-c')), reason: val('pe-r') });
+    toast(r && r.requested ? `اتبعت للمالك (${r.no})` : 'اتعدل الاستلام', 'ok'); } });
+  document.getElementById('pe-l').onchange = e => { const l = p.lines[+e.target.value], it = E.item(l.itemId); document.getElementById('pe-q').value = l.qty / (it.unit === 'kg' ? 1000 : 1); document.getElementById('pe-c').value = l.unitCost / 100; };
+};
 const DEF_EXP = { carcass: 10, meat: 7, spice: 180, pack: 720 };
-const PO = { sup: null, lines: [], q: '' };
+const PO = { sup: null, lines: [], q: '', newOpen: false };
 ACTS['po-new'] = () => {
   const s = S(); const sups = s.partners.filter(p => p.type === 'supplier');
   if (!sups.length) { toast('ضيف مورد الأول من شاشة الموردين', 'bad'); U.go('suppliers'); return; }
   if (!PO.sup || !sups.some(p => p.id === PO.sup)) PO.sup = sups[0].id;
-  PO.lines = []; PO.q = '';
+  PO.lines = []; PO.q = ''; PO.newOpen = false;
   modal('استلام بضاعة من مورد', `<div class="fgrid">
       <label class="fld"><span>المورد</span><select class="f" id="po-s">${partnerOptions('supplier', PO.sup)}</select></label>
       <label class="fld"><span>رقم فاتورة المورد</span><input class="f" id="po-r" placeholder="مثلًا 1045"></label>
@@ -638,7 +665,11 @@ function readPo() { document.querySelectorAll('#po-lines tr').forEach((tr, k) =>
 function drawPo() {
   const sp = E.partner(PO.sup), items = supItems();
   const last = id => { const p = S().docs.purchases.slice().reverse().find(x => x.supplierId === PO.sup && x.lines.some(l => l.itemId === id)); return p ? p.lines.find(l => l.itemId === id).unitCost : null; };
-  document.getElementById('po-items').innerHTML = `<div class="bar" style="gap:6px"><span class="crumb" style="font-weight:800">أصناف ${esc(sp.name)}:</span>${items.length > 6 ? `<input class="f" id="po-q" type="search" placeholder="ابحث في الأصناف" value="${esc(PO.q)}" aria-label="ابحث في أصناف المورد" style="width:180px;height:34px">` : ''}${items.map(i => `<button class="btn sm ${PO.lines.some(l => l.itemId === i.id) ? 'p' : ''}" data-act="po-pick" data-arg="${i.id}" data-name="${esc(i.name)}" ${PO.q.trim() && !i.name.includes(PO.q.trim()) ? 'hidden' : ''}>${esc(i.name)}</button>`).join('')}</div>${sp.items && sp.items.length ? '' : '<div class="note" style="margin-top:8px">المورد ده لسه مش متحدد أصنافه، فكل الأصناف ظاهرة. حددها من شاشة الموردين.</div>'}`;
+  document.getElementById('po-items').innerHTML = `<div class="bar" style="gap:6px"><span class="crumb" style="font-weight:800">أصناف ${esc(sp.name)}:</span>${items.length > 6 ? `<input class="f" id="po-q" type="search" placeholder="ابحث في الأصناف" value="${esc(PO.q)}" aria-label="ابحث في أصناف المورد" style="width:180px;height:34px">` : ''}${items.map(i => `<button class="btn sm ${PO.lines.some(l => l.itemId === i.id) ? 'p' : ''}" data-act="po-pick" data-arg="${i.id}" data-name="${esc(i.name)}" ${PO.q.trim() && !i.name.includes(PO.q.trim()) ? 'hidden' : ''}>${esc(i.name)}</button>`).join('')}${U.isOwner() ? `<button class="btn sm" data-act="po-newform" style="border-style:dashed">${ic('plus')} صنف جديد</button>` : ''}</div>
+    ${PO.newOpen ? `<div class="po-new" style="margin-top:8px;padding:10px;border:1px dashed var(--line);border-radius:12px"><div class="fgrid"><label class="fld"><span>اسم الصنف الجديد</span><input class="f" id="po-ni-n" placeholder="مثلًا: كتف ضاني"></label>
+      <label class="fld"><span>النوع</span><select class="f" id="po-ni-c"><option value="meat">لحوم وقطعيات (بالكيلو)</option><option value="carcass">لحوم بالعضم (بالكيلو)</option><option value="spice">توابل وإضافات (بالكيلو)</option><option value="pack">مواد تعبئة ومستلزمات (بالقطعة)</option></select></label>
+      <label class="fld"><span>القسم (اختياري)</span><input class="f" id="po-ni-s" placeholder="مثلًا: برازيلى"></label></div>
+      <div class="bar"><button class="btn p sm" data-act="po-newitem">ضيفه للمورد وللفاتورة</button><button class="btn sm" data-act="po-newform">إلغاء</button></div></div>` : ''}${sp.items && sp.items.length ? '' : '<div class="note" style="margin-top:8px">المورد ده لسه مش متحدد أصنافه، فكل الأصناف ظاهرة. حددها من شاشة الموردين.</div>'}`;
   document.getElementById('po-lines').innerHTML = PO.lines.map((l, k) => { const it = E.item(l.itemId), u = it.unit === 'kg' ? 'كجم' : 'قطعة'; const v = Math.round((parseFloat(l.qty) || 0) * (parseFloat(l.cost) || 0) * 100);
     return `<tr><td><b>${esc(it.name)}</b><div class="crumb">${E.CAT_NAME[it.cat]}${last(it.id) != null ? ' · آخر سعر ' + fm(last(it.id)) : ''}</div></td>
       <td data-l="الكمية"><div style="display:flex;align-items:center;gap:6px"><input class="f pl-q" type="number" min="0" step="${it.unit === 'kg' ? '0.001' : '1'}" value="${esc(l.qty || '')}" style="width:100px"><span class="crumb" style="white-space:nowrap">${u}</span></div></td>
@@ -656,6 +687,22 @@ function poTotals() {
   document.getElementById('po-tot').textContent = fm(net);
 }
 ACTS['po-pick'] = id => { readPo(); const k = PO.lines.findIndex(l => l.itemId === id); if (k >= 0) PO.lines.splice(k, 1); else { const it = E.item(id); PO.lines.push({ itemId: id, qty: '', cost: '', prod: E.today(), exp: E.addDays(E.today(), DEF_EXP[it.cat] || 30) }); } drawPo(); const q = document.querySelectorAll('.pl-q'); if (k < 0 && q.length) q[q.length - 1].focus(); };
+// a supplier brings something new: create the item, add it to the supplier's items and to this delivery
+ACTS['po-newform'] = () => { readPo(); PO.newOpen = !PO.newOpen; drawPo(); if (PO.newOpen) document.getElementById('po-ni-n').focus(); };
+ACTS['po-newitem'] = async () => {
+  const name = val('po-ni-n').trim(), cat = val('po-ni-c'), sub = val('po-ni-s').trim();
+  if (!name) { document.getElementById('po-ni-n').focus(); toast('اكتب اسم الصنف', 'bad'); return; }
+  readPo();
+  try {
+    await E.saveItem({ name, cat, unit: cat === 'pack' ? 'pc' : 'kg', priceRetail: 0, priceWholesale: 0, minQty: 0, vat: 0, ...(sub && ['meat', 'carcass'].includes(cat) ? { sub } : {}) });
+    const it = S().items.find(i => i.name === name); if (!it) throw new Error('الصنف متضافش، جرّب تاني');
+    const sp = E.partner(PO.sup);
+    if (sp.items && sp.items.length && !sp.items.includes(it.id)) await E.savePartner({ id: sp.id, type: 'supplier', name: sp.name, phone: sp.phone || '', kind: sp.kind, terms: sp.terms, taxId: sp.taxId || '', supplies: sp.supplies || '', items: [...sp.items, it.id] });
+    PO.lines.push({ itemId: it.id, qty: '', cost: '', prod: E.today(), exp: E.addDays(E.today(), DEF_EXP[it.cat] || 30) });
+    PO.newOpen = false; drawPo(); toast('اتضاف الصنف للمورد وللفاتورة', 'ok');
+    const q = document.querySelectorAll('.pl-q'); if (q.length) q[q.length - 1].focus();
+  } catch (e) { toast(e.message, 'bad'); }
+};
 ACTS['po-del'] = k => { readPo(); PO.lines.splice(+k, 1); drawPo(); };
 
 /* ========== SUPPLIERS ========== */

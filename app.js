@@ -83,12 +83,12 @@ const ic = n => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" str
 const ALL = ['owner', 'accountant', 'storekeeper', 'supervisor', 'sales'];
 const PAGES = {};
 const NAV = [
-  ['', [['home', 'نظرة عامة', 'home', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
+  ['', [['home', 'الرئيسية', 'home', ALL], ['alerts', 'التنبيهات', 'bell', ALL]]],
   ['الإنتاج والمخازن', [['batches', 'التشغيلات', 'batch', ['owner', 'supervisor', 'accountant']], ['worker', 'شاشة العامل', 'hand', ['owner', 'supervisor', 'worker', 'packer']], ['cutting', 'تشغيلات الجزارة', 'knife', ['owner', 'supervisor', 'storekeeper', 'accountant']], ['stock', 'المخزون والدفعات', 'box', ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales']]]],
   ['المشتريات', [['purchases', 'الاستلام والمشتريات', 'truck', ['owner', 'storekeeper', 'accountant']], ['suppliers', 'الموردين', 'users', ['owner', 'storekeeper', 'accountant']]]],
   ['المبيعات', [['orders', 'طلبات واتساب', 'send', ['owner', 'sales', 'accountant']], ['invoices', 'الفواتير', 'bill', ['owner', 'sales', 'accountant']], ['products', 'المنتجات', 'box', ['owner', 'storekeeper', 'supervisor', 'sales', 'accountant']], ['customers', 'العملاء', 'users', ['owner', 'sales', 'accountant']], ['items', 'الأصناف والأسعار', 'tag', ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor']]]],
   ['الحسابات', [['treasury', 'الخزنة والبنوك', 'cash', ['owner', 'accountant']], ['staff', 'السلف والعهد', 'users', ['owner', 'accountant']], ['expenses', 'المصروفات والإهلاك', 'receipt', ['owner', 'accountant']], ['journal', 'القيود اليومية', 'book', ['owner', 'accountant']], ['coa', 'دليل الحسابات', 'tree', ['owner', 'accountant']], ['reports', 'القوائم المالية', 'chart', ['owner']], ['opening', 'أرصدة البداية', 'book', ['owner', 'accountant']]]],
-  ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['access', 'الشاشات لكل دور', 'lock', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
+  ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['requests', 'طلبات التعديل', 'check', ['owner']], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين', 'shield', ['owner']], ['access', 'الصلاحيات', 'lock', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
 const ACCESS = {}; NAV.forEach(([, items]) => items.forEach(([id, t, , roles]) => { ACCESS[id] = { t, roles }; }));
 const DETAIL_PARENT = { bill: 'customers', butchery: 'cutting', order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
@@ -127,7 +127,12 @@ function runQuick(key) { if (key.startsWith('go:')) go(key.slice(3)); else if (A
 // screens per role: the defaults above, or what the owner set in «الشاشات لكل دور» (the owner always sees everything; the engine still guards every operation)
 const LOCKED = new Set(['users', 'access', 'settings']); // owner-only, never handed out
 function rolesFor(id, def) { const a = (S() && S().settings && S().settings.access) || {}; return role() === 'owner' || LOCKED.has(id) || !a[id] ? def : ['owner', ...a[id]]; }
-function allowed(page) { const base = DETAIL_PARENT[page] || page; const a = ACCESS[base]; return a && rolesFor(base, a.roles).includes(role()); }
+function canSee(id, def) { // a person's own list (if the owner set one) wins over their role
+  const ua = ((S() && S().settings && S().settings.userAccess) || {})[S().currentUser];
+  if (role() !== 'owner' && ua && !LOCKED.has(id)) return id === 'home' || id === homeFor() || ua.includes(id);
+  return rolesFor(id, def).includes(role());
+}
+function allowed(page) { const base = DETAIL_PARENT[page] || page; const a = ACCESS[base]; return a && canSee(base, a.roles); }
 function homeFor() { return ['worker', 'packer'].includes(role()) ? 'worker' : 'home'; }
 
 /* ---------- router ---------- */
@@ -142,11 +147,11 @@ function renderSide() {
   notifyNew(unread);
   const pend = S_.docs.corrections.filter(c => c.status === 'pending').length;
   const openB = S_.docs.batches.filter(b => b.status === 'open').length;
-  const badge = { alerts: unread, batches: openB, users: PENDING_REQ, orders: (S_.docs.orders || []).filter(o => o.status === 'pending').length };
+  const badge = { alerts: unread, batches: openB, users: PENDING_REQ, requests: (S_.docs.changes || []).filter(c => c.status === 'pending').length + S_.docs.corrections.filter(c => c.status === 'pending').length, orders: (S_.docs.orders || []).filter(o => o.status === 'pending').length };
   const cur = DETAIL_PARENT[route.page] || route.page;
   let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div><nav class="side-nav" aria-label="الشاشات">`;
   for (const [g, items] of NAV) {
-    const vis = items.filter(([id, , , roles]) => rolesFor(id, roles).includes(role()));
+    const vis = items.filter(([id, , , roles]) => canSee(id, roles));
     if (!vis.length) continue;
     if (g) h += `<div class="nav-g">${g}</div>`;
     for (const [id, t, icon] of vis) h += `<button class="nav ${cur === id ? 'on' : ''}" data-go="${id}">${ic(icon)}<span>${t}</span>${badge[id] ? `<span class="b">${badge[id]}</span>` : ''}${id === 'batches' && pend && isOwner() ? `<span class="b" style="background:#fff;color:var(--red);margin-inline-start:4px" title="طلبات تصحيح مستنية موافقة">${pend}</span>` : ''}</button>`;
@@ -167,7 +172,7 @@ function renderTop(title, crumb, extra) {
     <button class="icon-btn menu-btn" data-act="menu" aria-label="القائمة">${ic('menu')}</button>
     <div><div class="crumb">${crumb || dfl(E.today())}</div><h1>${title}</h1></div>
     <div class="tools">${extra || ''}
-      ${role() !== 'worker' ? `<button class="find-btn no-print" data-act="find" aria-label="بحث في السيستم">${ic('search')}<span>ابحث عن عميل، مورد، صنف، فاتورة…</span><kbd>⌘K</kbd></button>` : ''}
+      ${role() !== 'worker' ? `<button class="find-btn no-print" data-act="find" aria-label="بحث في السيستم">${ic('search')}<span>ابحث عن عميل أو مورد أو صنف أو فاتورة</span><kbd>⌘K</kbd></button>` : ''}
       <button class="icon-btn no-print" data-act="refresh" aria-label="تحديث" title="تحديث">${ic('refresh')}</button>
       ${quickFor().length ? `<button class="btn p no-print btn-new" data-act="newmenu" aria-label="جديد">${ic('plus')}<span class="lbl">جديد</span></button>` : ''}
       ${LIVE ? '' : `<label class="no-print" style="display:flex;align-items:center;gap:6px"><span class="crumb" style="white-space:nowrap">جرّب كـ</span>
@@ -357,7 +362,7 @@ function findIndex() {
   if (can('batches')) s.docs.batches.slice(-150).reverse().forEach(b => add('التشغيلات', 'batch', b.no, `${E.item(b.productId).name} · ${b.status === 'open' ? 'جارية' : 'مقفولة'} · ${df(b.date)}`, 'batch/' + b.id));
   if (can('invoices')) s.docs.invoices.slice(-300).reverse().forEach(v => add('الفواتير', 'bill', v.no, `${E.partner(v.customerId).name} · ${fm0(v.total)} ج · ${df(v.date)}`, 'invoice/' + v.id));
   if (can('purchases')) s.docs.purchases.slice(-150).reverse().forEach(x => add('المشتريات', 'receipt', x.no, `${E.partner(x.supplierId).name} · ${fm0(x.total)} ج · ${df(x.date)}${x.ref ? ' · ' + x.ref : ''}`, 'purchase/' + x.id, [x.ref]));
-  NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (rolesFor(id, roles).includes(role())) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
+  NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (canSee(id, roles)) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
   return out;
 }
 let FIND = { idx: [], res: [], sel: 0 };
@@ -417,7 +422,7 @@ ACTS.theme = () => {
   try { localStorage.setItem('boom-theme', nx); } catch (e) { /* ignore */ }
   const top = document.getElementById('top'); if (top && top.innerHTML) render(); else { const b = document.querySelector('.lang-pill [data-act="theme"]'); if (b) b.innerHTML = ic(isDark() ? 'sun' : 'moon'); }
 };
-ACTS.lang = () => { LANG = LANG === 'en' ? 'ar' : 'en'; try { localStorage.setItem('boom-lang', LANG); } catch (e) { /* ignore */ } location.reload(); };
+ACTS.lang = () => { LANG = LANG === 'en' ? 'ar' : 'en'; try { localStorage.setItem('boom-lang', LANG); } catch (e) { /* ignore */ } const calm = matchMedia('(prefers-reduced-motion: reduce)').matches; document.body.classList.add('lang-out'); setTimeout(() => location.reload(), calm ? 0 : 220); }; // a short fade instead of a hard flash
 ACTS.print = () => window.print();
 
 /* ---------- toast / modal ---------- */
@@ -663,7 +668,11 @@ const CFG = window.BOOM_CONFIG || null;
 const LIVE = !!(CFG && CFG.url && CFG.anonKey);
 let SB = null, VERSION = -1, PROFILE = null, PENDING_REQ = 0;
 async function countRequests() { if (!SB || !PROFILE || PROFILE.role !== 'owner') return; const { count } = await SB.from('profiles').select('user_id', { count: 'exact', head: true }).eq('role', 'pending'); PENDING_REQ = count || 0; }
-const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'decideOrder'];
+const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 'requestCorrection', 'decideCorrection', 'closeBatch', 'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff', 'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'decideOrder',
+  // Nov 2026: every operation the server accepts must be listed here, or in live mode it would only change this browser (tests check the two lists match)
+  'deposit', 'payLiability', 'advance', 'advanceBack', 'custody', 'settleCustody', 'saveAccount', 'deleteAccount',
+  'openButchery', 'butcheryInput', 'butcheryPack', 'butcheryOutput', 'butcheryDropOutput', 'butcheryEditOutput', 'butcheryDropInput', 'butcheryDropPack', 'newCutItem', 'closeButchery', 'finishMeat', 'returnRework',
+  'updateAccess', 'updateUserAccess', 'decideChange', 'editPurchaseLine', 'invoiceReturn', 'invoicePrice'];
 let busyN = 0;
 function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"><span class="busy-pill"><i></i>جاري الحفظ…</span></div>'); if (busyN <= 0 && b) b.remove(); }
 async function api(op, args) {

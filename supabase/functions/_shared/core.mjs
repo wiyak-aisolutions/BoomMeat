@@ -7,6 +7,7 @@ export const OPS = new Set([
   'invoice', 'receipt', 'supplierPayment', 'expense', 'cashTransfer', 'depreciate', 'writeOff',
   'deposit', 'payLiability', 'advance', 'advanceBack', 'custody', 'settleCustody', 'saveAccount', 'deleteAccount',
   'openButchery', 'butcheryInput', 'butcheryPack', 'butcheryOutput', 'butcheryDropOutput', 'newCutItem', 'closeButchery', 'finishMeat', 'returnRework', 'updateAccess',
+  'decideChange', 'editPurchaseLine', 'invoiceReturn', 'invoicePrice', 'butcheryEditOutput', 'butcheryDropInput', 'butcheryDropPack', 'updateUserAccess',
   'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck', 'decideOrder',
 ]);
 
@@ -104,7 +105,7 @@ async function deliverAlerts({ E, db, ids, telegram, copy }) {
     if (!S0.settings.telegram) { status[id] = ['off', '']; continue; }
     if (!telegram || !chat) { status[id] = ['noconfig', '']; continue; }
     const icon = a.level === 'bad' ? '🔴' : a.level === 'warn' ? '🟠' : '🔵';
-    const r = await telegram(chat, `${icon} بوم ميت\n${a.text}`);
+    const r = await telegram(chat, `${icon} بوم ميت\n${a.text}`, a.kb ? { inline_keyboard: [a.kb.map(([text, data]) => ({ text, callback_data: data }))] } : undefined); // requests carry approve/reject buttons
     status[id] = r.ok ? ['sent', ''] : ['failed', r.error || ''];
     if (copy) { try { await copy(`${icon} بوم ميت\n${a.text}`); } catch (_e) { /* viewers are best effort */ } } // people the owner invited to watch
   }

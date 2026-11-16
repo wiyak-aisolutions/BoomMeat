@@ -28,11 +28,11 @@ const db = {
     snapDay = day;
   },
 };
-async function telegram(chat: string, text: string) {
+async function telegram(chat: string, text: string, markup?: unknown) {
   const token = await secret('telegram_token');
   if (!token) return { ok: false, error: 'مفيش توكن' };
   try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text }) });
+    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text, ...(markup ? { reply_markup: markup } : {}) }) });
     const j = await r.json();
     return j.ok ? { ok: true } : { ok: false, error: j.description || 'فشل الإرسال' };
   } catch (_e) { return { ok: false, error: 'مفيش اتصال بتليجرام' }; }

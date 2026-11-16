@@ -1092,3 +1092,19 @@ select option:disabled{color:#8A8790}
 
 /* consolidated bill: one table per branch */
 .inv table.bill-br{margin-top:14px}.inv table.bill-br thead tr:first-child th{background:transparent;color:var(--ink,#111);font-size:14px;text-align:start;border-bottom:2px solid currentColor}.inv table.bill-br tr.sub td{border-top:1px solid #bbb}
+/* ---- Nov 2026 polish: clearer logo, softer sidebar, full search text, calmer type, language fade ---- */
+.side .brand{background:rgba(255,253,249,.93);box-shadow:0 6px 18px -10px rgba(0,0,0,.35);padding:8px 10px}
+.side .brand img{height:64px;filter:contrast(1.06) saturate(1.05)}
+:root:not([data-theme="dark"]){--side:linear-gradient(180deg,rgba(34,37,58,.86),rgba(26,28,44,.9))}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--side:linear-gradient(180deg,rgba(18,19,30,.94),rgba(12,13,22,.96))}}
+.find-btn span{max-width:none;overflow:visible;text-overflow:clip}
+@media (max-width:1180px){.find-btn span{max-width:200px;overflow:hidden;text-overflow:ellipsis}}
+body{font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.nav{font-size:14.5px;font-weight:600}
+.crumb{font-weight:600}
+@keyframes boom-in{from{opacity:0}to{opacity:1}}
+body{animation:boom-in .28s ease-out both}
+body.lang-out{opacity:0;transition:opacity .2s ease-in}
+@media (prefers-reduced-motion: reduce){body{animation:none}body.lang-out{transition:none}}
+.acc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px}.acc-list label{display:flex;gap:8px;align-items:center;font-size:14px;padding:4px 0}
+.wk-views button{min-height:42px;font-size:15px;padding:0 16px}.wk-views small{opacity:.7;margin-inline-start:4px}

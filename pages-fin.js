@@ -288,24 +288,49 @@ let INV_PRINT = null; // open the print dialog once, right after a sale is confi
 PAGES.invoice = id => {
   const s = S(), v = s.docs.invoices.find(x => x.id === id); if (!v) { U.go('invoices'); return; }
   if (INV_PRINT === id) { INV_PRINT = null; setTimeout(() => window.print(), 450); }
-  const c = E.partner(v.customerId), co = s.settings.company, paid = E.invoicePaid(v), left = v.total - paid;
+  const c = E.partner(v.customerId), co = s.settings.company, paid = E.invoicePaid(v), back = E.invoiceReturned(v), left = v.total - back - paid;
+  const rets = (s.docs.returns || []).filter(r => r.invoiceId === v.id), canEdit = ['owner', 'accountant', 'sales'].includes(U.role()), canRet = canEdit && v.lines.some(l => (l.returned || 0) < l.count);
   const viaOrder = (s.docs.orders || []).some(o => o.invoiceId === v.id), canCollect = ['owner', 'accountant', 'sales'].includes(U.role());
-  page(`فاتورة ${esc(v.no)}`, `<div class="bar no-print"><button class="btn p" data-act="print">${ic('print')} طباعة</button>${left > 0 && !viaOrder && canCollect ? `<button class="btn" data-act="inv-collect" data-arg="${v.id}">${ic('cash')} تحصيل</button>` : ''}<span class="pill ${left > 0 ? 'warn' : 'ok'}">اتحصل ${fm(paid)}${left > 0 ? ` · الباقي ${fm(left)}` : ' · خالصة'}</span><button class="btn" data-go="newinvoice">بيع جديدة</button>${U.isOwner() ? `<span class="pill mut">التكلفة ${fm(v.cost)} · الربح ${fm(v.net - v.cost)}</span>` : ''}<span class="pill mut">القيد ${esc(v.je)}${v.paidJe ? ' · ' + esc(v.paidJe) : ''}</span></div>
+  page(`فاتورة ${esc(v.no)}`, `<div class="bar no-print"><button class="btn p" data-act="print">${ic('print')} طباعة</button>${left > 0 && !viaOrder && canCollect ? `<button class="btn" data-act="inv-collect" data-arg="${v.id}">${ic('cash')} تحصيل</button>` : ''}${canRet ? `<button class="btn" data-act="inv-return" data-arg="${v.id}">مرتجع</button>` : ''}${canEdit && !v.vat && !v.vatIncluded && v.lines.some(l => !l.returned) ? `<button class="btn" data-act="inv-price" data-arg="${v.id}">تعديل سعر</button>` : ''}${back ? `<span class="pill info">مرتجع ${fm(back)}</span>` : ''}<span class="pill ${left > 0 ? 'warn' : 'ok'}">اتحصل ${fm(paid)}${left > 0 ? ` · الباقي ${fm(left)}` : ' · خالصة'}</span><button class="btn" data-go="newinvoice">بيع جديدة</button>${U.isOwner() ? `<span class="pill mut">التكلفة ${fm(v.cost)} · الربح ${fm(v.net - v.cost)}</span>` : ''}<span class="pill mut">القيد ${esc(v.je)}${v.paidJe ? ' · ' + esc(v.paidJe) : ''}</span></div>
     <div class="inv">
       <div class="inv-h"><div><img src="boom-logo.png" alt="Boom Meat"><div><b>${esc(co.name)}</b></div><small>${esc(co.address)}</small><br><small>رقم التسجيل الضريبي: ${esc(co.taxId)}</small><br><small dir="ltr">${esc(co.phone)}</small></div>
         <div class="r"><b style="font-size:20px">${v.vat ? 'فاتورة ضريبية' : 'فاتورة'}</b><div>رقم: <span class="mono">${esc(v.no)}</span></div><div>التاريخ: ${esc(v.date)}</div><div>${esc(v.at.slice(11, 16))}</div></div></div>
       <div class="inv-m"><div><small>العميل</small><b>${esc(c.name)}</b>${v.branchName ? `<br>فرع: <b>${esc(v.branchName)}</b>` : ''}<br>${c.kind === 'wholesale' ? 'جملة' : 'قطاعي'} · ${E.payLabel(v.method)}${c.taxId ? `<br>رقم ضريبي: ${esc(c.taxId)}` : ''}${c.phone ? `<br><span dir="ltr">${esc(c.phone)}</span>` : ''}</div>
         <div><small>بيانات الطلب</small>استلام من المصنع<br>بواسطة: ${esc(E.userName(v.by))}<br>تشغيلات: ${[...new Set(v.lines.flatMap(l => l.parts.map(p => (s.lots.find(x => x.id === p.lotId) || {}).src).filter(Boolean).map(x => x.no)))].map(esc).join('، ')}</div></div>
       <table><thead><tr><th>#</th><th>الصنف</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">الإجمالي</th></tr></thead>
-        <tbody>${v.lines.map((l, k) => `<tr><td>${k + 1}</td><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n">${fm(l.amount)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${v.lines.map((l, k) => `<tr><td>${k + 1}</td><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n">${fm(l.amount)}${l.returned ? `<br><small style="color:#b45309">رجع ${l.returned}</small>` : ''}</td></tr>`).join('')}</tbody></table>
       <div class="inv-f"><div style="display:flex;gap:12px;align-items:flex-end"><div class="qr">QR<br>الفاتورة<br>الإلكترونية</div><div style="font-size:11.5px;color:#666">الرقم الإلكتروني (UUID)<br><span class="mono">${esc(v.eta.uuid.slice(0, 8))}…${esc(v.eta.uuid.slice(-6))}</span><br>حالة المنظومة: مقبولة (محاكاة)</div></div>
         <div class="inv-t"><div><span>الإجمالي</span><span>${fm(v.gross)}</span></div><div><span>خصم</span><span>${fm(v.discount)}</span></div>${v.vat ? `<div><span>الصافي</span><span>${fm(v.net)}</span></div><div><span>ضريبة القيمة المضافة</span><span>${fm(v.vat)}</span></div>` : ''}<div class="g"><span>الإجمالي المستحق</span><span>${fm(v.total)} ج</span></div></div></div>
       <div style="display:flex;gap:40px;font-size:12.5px;color:#666;padding-top:10px"><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المستلم</span><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المسؤول</span></div>
-    </div>`, { crumb: '<a href="#invoices">الفواتير</a> / ' + esc(v.no) });
+    </div>
+    ${rets.length || (v.edits || []).length ? `<div class="card no-print"><div class="hd"><h3>المرتجعات والتعديلات</h3></div><div class="bd">${table('inv-rt-' + v.id, [{ t: 'الرقم', f: r => `<span class="mono">${esc(r.no)}</span>` }, { t: 'التاريخ', f: r => r.date ? df(r.date) : tf(r.at) }, { t: 'التفاصيل', f: r => r.lines ? r.lines.map(l => `${l.count} × ${esc(E.item(l.productId).name)} ${packName(l.packSize)}`).join('، ') + (r.restock ? '' : ' <span class="pill bad">هالك</span>') + (r.refund ? ' <span class="pill mut">اترد فلوس</span>' : '') : `سعر ${esc(E.item(v.lines[r.idx].productId).name)}: ${fm(r.from)} ← ${fm(r.to)}` }, { t: 'المبلغ', n: 1, f: r => r.total != null ? fm(r.total) : '' }, { t: 'بواسطة', f: r => esc(E.userName(r.by)) }, { t: 'السبب', f: r => esc(r.reason || '') }], [...rets, ...(v.edits || []).map(e => ({ ...e, no: 'تعديل' }))])}</div></div>` : ''}`, { crumb: '<a href="#invoices">الفواتير</a> / ' + esc(v.no) });
+};
+const ownerNote = () => U.isOwner() ? '<div class="note">إنت المالك: التعديل هيتنفذ على طول ويتسجل في سجل الحركات. متأكد؟</div>' : '<div class="note info">التعديل هيتبعت للمالك يوافق عليه (من السيستم أو تليجرام)، ومش هيتنفذ قبل موافقته.</div>';
+const reasonField = id => `<label class="fld"><span>السبب${U.isOwner() ? ' (اختياري)' : ''}</span><input class="f" id="${id}" placeholder="مثلًا: العميل رجّع كرتونة"></label>`;
+const doneMsg = (r, ok) => (r && r.requested ? `اتبعت للمالك (${r.no})` : ok);
+ACTS['inv-return'] = id => {
+  const v = S().docs.invoices.find(x => x.id === id);
+  modal('مرتجع على فاتورة ' + esc(v.no), `${ownerNote()}
+    <div class="tw"><table class="t"><thead><tr><th>الصنف</th><th>العبوة</th><th class="n">اتباع</th><th class="n">راجع</th></tr></thead><tbody>${v.lines.map((l, k) => { const left = l.count - (l.returned || 0); return `<tr><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}${l.returned ? ` <small>(رجع ${l.returned})</small>` : ''}</td><td class="n"><input class="f rt-c" data-k="${k}" type="number" min="0" max="${left}" step="1" value="0" style="width:90px" ${left ? '' : 'disabled'}></td></tr>`; }).join('')}</tbody></table></div>
+    <div class="fgrid"><label class="fld"><span>البضاعة اللي راجعة</span><select class="f" id="rt-s"><option value="1">ترجع الفريزر وتتباع تاني</option><option value="0">هالك (مش هتتباع)</option></select></label>
+      <label class="fld"><span>الفلوس</span><select class="f" id="rt-m"><option value="">تتخصم من حساب العميل</option>${U.moneyAccs('cash').map(c => `<option value="${c}">ترجع للعميل من ${esc(accName(c))}</option>`).join('')}</select></label>
+      <label class="fld"><span>التاريخ</span><input class="f" id="rt-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>${reasonField('rt-r')}`,
+  { wide: true, saveText: U.isOwner() ? 'تأكيد المرتجع' : 'ابعت للمالك', save: async () => {
+    const lines = [...document.querySelectorAll('.rt-c')].map(el => ({ idx: +el.dataset.k, count: toI(el.value || '0') || 0 })).filter(l => l.count > 0);
+    const r = await E.invoiceReturn({ invoiceId: id, lines, restock: val('rt-s') === '1', refund: val('rt-m') || null, date: val('rt-d'), reason: val('rt-r') });
+    toast(doneMsg(r, `اتسجل المرتجع ${r.no || ''}`), 'ok'); } });
+};
+ACTS['inv-price'] = id => {
+  const v = S().docs.invoices.find(x => x.id === id);
+  modal('تعديل سعر في فاتورة ' + esc(v.no), `${ownerNote()}
+    <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="ip-l">${v.lines.map((l, k) => `<option value="${k}" ${l.returned ? 'disabled' : ''} ${k === v.lines.findIndex(x => !x.returned) ? 'selected' : ''}>${esc(E.item(l.productId).name)} ${packName(l.packSize)} × ${l.count} · ${fm0(l.pricePerKg)} ج للكيلو</option>`).join('')}</select></label>
+      <label class="fld"><span>سعر الكيلو الجديد (ج)</span><input class="f" id="ip-p" type="number" min="0" step="0.5"></label></div>
+    <div class="crumb">الفرق بيتسجل على حساب العميل (زيادة أو نقص).</div>${reasonField('ip-r')}`,
+  { saveText: U.isOwner() ? 'تأكيد التعديل' : 'ابعت للمالك', save: async () => { const r = await E.invoicePrice({ invoiceId: id, idx: toI(val('ip-l')), pricePerKg: toP(val('ip-p')), reason: val('ip-r') }); toast(doneMsg(r, 'اتعدل السعر'), 'ok'); } });
 };
 
 ACTS['inv-collect'] = id => {
-  const v = S().docs.invoices.find(x => x.id === id), left = v.total - E.invoicePaid(v);
+  const v = S().docs.invoices.find(x => x.id === id), left = v.total - E.invoiceReturned(v) - E.invoicePaid(v);
   modal('تحصيل فاتورة ' + esc(v.no), `<div class="note info">${esc(E.partner(v.customerId).name)} · الباقي على الفاتورة <b>${fm(left)} ج</b>. اكتب المبلغ اللي اتحصل فعلاً.</div>
   <div class="fgrid"><label class="fld"><span>المبلغ اللي اتحصل (ج)</span><input class="f" id="ic-a" type="number" min="0" step="0.01" value="${left / 100}"></label><label class="fld"><span>الطريقة</span><select class="f" id="ic-m">${U.moneyOptions('in', '1101')}</select></label><label class="fld"><span>التاريخ</span><input class="f" id="ic-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>
   <label class="fld"><span>ملاحظة</span><input class="f" id="ic-n"></label>`, { saveText: 'تسجيل التحصيل', save: async () => { await E.receipt({ date: val('ic-d'), customerId: v.customerId, amount: toP(val('ic-a')), method: val('ic-m'), memo: val('ic-n'), invoiceId: v.id }); toast('اتسجل التحصيل', 'ok'); } });
@@ -365,9 +390,29 @@ function partnerForm(p, type) {
     <label class="fld"><span>التعامل</span><select class="f" id="pf-t"><option value="credit" ${p.terms === 'credit' ? 'selected' : ''}>آجل</option><option value="cash" ${p.terms === 'cash' ? 'selected' : ''}>كاش</option></select></label>` : ''}
     <label class="fld"><span>الرقم الضريبي</span><input class="f" id="pf-tx" value="${esc(p.taxId || '')}" dir="ltr"></label></div>
     ${p.type === 'customer' ? `<label class="fld"><span>الفروع (لو العميل ليه أكتر من فرع)</span><textarea class="f" id="pf-br" style="min-height:90px" placeholder="المقطم شارع 9 | العنوان | التليفون">${esc((p.branches || []).map(b => [b.name, b.address, b.phone].filter((x, i) => x || i === 0).join(' | ')).join('\n'))}</textarea></label><div class="crumb">كل فرع في سطر: <b>الاسم</b> وبعدين العنوان والتليفون لو موجودين. كل الفروع على حساب واحد، وفي البيع بتختار الفرع، وتقدر تطلع فاتورة مجمعة بكل الفروع.</div>` : ''}
-    ${p.type === 'supplier' ? `<div><b>الأصناف اللي بيورّدها</b><div class="crumb">في الاستلام هتظهر الأصناف دي بس، فمحدش يسجل صنف من مورد غلط.</div>${supItems()}</div>` : ''}`;
+    ${p.type === 'supplier' ? `<div><b>الأصناف اللي بيورّدها</b><div class="crumb">في الاستلام هتظهر الأصناف دي بس، فمحدش يسجل صنف من مورد غلط.</div>${supItems()}${U.isOwner() ? `
+      <div class="pf-new" style="margin-top:12px;padding:12px;border:1px dashed var(--line);border-radius:12px">
+        <b style="font-size:13px">صنف جديد مش في القايمة؟</b><div class="crumb">اكتب اسمه ونوعه، وهيتضاف للأصناف ويتعلّم للمورد ده على طول.</div>
+        <div class="fgrid" style="margin-top:8px"><label class="fld"><span>اسم الصنف</span><input class="f" id="pf-ni-n" placeholder="مثلًا: كتف ضاني"></label>
+          <label class="fld"><span>النوع</span><select class="f" id="pf-ni-c"><option value="meat">لحوم وقطعيات (بالكيلو)</option><option value="carcass">لحوم بالعضم (بالكيلو)</option><option value="spice">توابل وإضافات (بالكيلو)</option><option value="pack">مواد تعبئة ومستلزمات (بالقطعة)</option></select></label>
+          <label class="fld"><span>القسم (اختياري)</span><input class="f" id="pf-ni-s" placeholder="مثلًا: برازيلى"></label></div>
+        <button class="btn" type="button" data-act="pf-newitem">${ic('plus')} ضيف الصنف</button></div>` : ''}</div>` : ''}`;
 }
 const readPartner = (type, id) => ({ id, type, name: val('pf-n'), phone: val('pf-ph'), kind: type === 'customer' ? val('pf-k') : null, terms: type === 'customer' ? val('pf-t') : 'credit', taxId: val('pf-tx'), ...(type === 'customer' && document.getElementById('pf-br') ? { branches: val('pf-br').split(/\r?\n/).map(l => l.split('|').map(x => x.trim())).filter(c => c[0]).map(c => ({ name: c[0], address: c[1] || '', phone: c[2] || '' })) } : {}), items: type === 'supplier' ? [...document.querySelectorAll('.pf-i:checked')].map(x => x.value) : [] });
+// a supplier brings something new: create the item from the supplier form and tick it right away
+ACTS['pf-newitem'] = async () => {
+  const name = val('pf-ni-n').trim(), cat = val('pf-ni-c'), sub = val('pf-ni-s').trim();
+  if (!name) { document.getElementById('pf-ni-n').focus(); toast('اكتب اسم الصنف', 'bad'); return; }
+  try {
+    const it = await E.saveItem({ name, cat, unit: cat === 'pack' ? 'pc' : 'kg', priceRetail: 0, priceWholesale: 0, minQty: 0, vat: 0, ...(sub && ['meat', 'carcass'].includes(cat) ? { sub } : {}) });
+    const made = (it && it.id ? it : S().items.find(i => i.name === name));
+    const g = ['carcass', 'meat'].includes(cat) ? 0 : cat === 'spice' ? 1 : 2;
+    const grid = document.querySelector(`.pf-grid[data-g="${g}"]`);
+    if (grid && made) grid.insertAdjacentHTML('beforeend', `<label style="display:flex;gap:8px;align-items:center;padding:6px 10px;border:1px solid var(--ok);border-radius:10px;background:var(--glass2);cursor:pointer"><input type="checkbox" class="pf-i" value="${made.id}" checked> <span>${esc(made.name)}</span></label>`);
+    ['pf-ni-n', 'pf-ni-s'].forEach(id => { document.getElementById(id).value = ''; });
+    toast('اتضاف الصنف واتعلّم للمورد', 'ok');
+  } catch (e) { toast(e.message, 'bad'); }
+};
 ACTS['pf-all'] = g => { const boxes = [...document.querySelectorAll(`.pf-grid[data-g="${g}"] .pf-i`)]; const on = !boxes.every(b => b.checked); boxes.forEach(b => { b.checked = on; }); };
 ACTS['partner-new'] = type => modal(type === 'customer' ? 'عميل جديد' : 'مورد جديد', partnerForm(null, type), { wide: type === 'supplier', save: async () => { await E.savePartner(readPartner(type)); toast('اتضاف', 'ok'); } });
 ACTS['partner-edit'] = id => { const p = E.partner(id); modal('تعديل ' + esc(p.name), partnerForm(p), { wide: p.type === 'supplier', save: async () => { await E.savePartner(readPartner(p.type, id)); toast('اتحفظ', 'ok'); } }); };
@@ -618,8 +663,8 @@ PAGES.audit = () => {
 };
 PAGES.users = () => {
   const s = S(), live = U.LIVE;
-  const ACC = { home: U.ALL, batches: ['owner', 'supervisor', 'accountant'], worker: ['owner', 'supervisor', 'worker'], cutting: ['owner', 'supervisor', 'storekeeper', 'accountant'], stock: ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['owner', 'storekeeper', 'accountant'], invoices: ['owner', 'sales', 'accountant'], customers: ['owner', 'sales', 'accountant'], items: ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['owner', 'accountant'], reports: ['owner', 'accountant'], opening: ['owner', 'accountant'], audit: ['owner', 'accountant'], settings: ['owner'] };
-  const pages = [['home', 'نظرة عامة'], ['batches', 'التشغيلات'], ['worker', 'شاشة العامل'], ['cutting', 'التقطيع'], ['stock', 'المخزون'], ['purchases', 'المشتريات'], ['invoices', 'الفواتير'], ['customers', 'العملاء'], ['items', 'الأصناف'], ['treasury', 'الخزنة'], ['reports', 'القوائم المالية'], ['opening', 'أرصدة البداية'], ['audit', 'سجل الحركات'], ['settings', 'الإعدادات']];
+  const ACC = { home: U.ALL, batches: ['owner', 'supervisor', 'accountant'], worker: ['owner', 'supervisor', 'worker', 'packer'], cutting: ['owner', 'supervisor', 'storekeeper', 'accountant'], stock: ['owner', 'storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['owner', 'storekeeper', 'accountant'], invoices: ['owner', 'sales', 'accountant'], customers: ['owner', 'sales', 'accountant'], items: ['owner', 'storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['owner', 'accountant'], reports: ['owner', 'accountant'], opening: ['owner', 'accountant'], audit: ['owner', 'accountant'], settings: ['owner'] };
+  const pages = [['home', 'الرئيسية'], ['batches', 'التشغيلات'], ['worker', 'شاشة العامل'], ['cutting', 'تشغيلات الجزارة'], ['stock', 'المخزون'], ['purchases', 'المشتريات'], ['invoices', 'الفواتير'], ['customers', 'العملاء'], ['items', 'الأصناف'], ['treasury', 'الخزنة'], ['reports', 'القوائم المالية'], ['opening', 'أرصدة البداية'], ['audit', 'سجل الحركات'], ['settings', 'الإعدادات']];
   const cols = [{ t: 'الاسم', f: u => `<span style="display:inline-flex;gap:10px;align-items:center">${U.avatar(u, 'av-sm')}<b>${esc(u.name)}</b></span>` }, { t: 'اسم الدخول', f: u => `<span class="mono">${esc(u.username || '—')}</span>` }, { t: 'الدور', f: u => E.ROLES[u.role].name }, { t: 'الحالة', f: u => u.active === false ? '<span class="pill bad">موقوف</span>' : '<span class="pill ok">شغال</span>' }];
   cols.push({ t: '', f: u => live ? (u.id === s.currentUser ? `<span class="pill red">حسابك</span> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">غيّر الباسورد</button>` : `<button class="btn sm" data-act="usr-edit" data-arg="${u.id}">تعديل</button> <button class="btn sm" data-act="usr-pw" data-arg="${u.id}">باسورد جديد</button>`) : (u.id === s.currentUser ? '<span class="pill red">الحساب الحالي</span>' : `<button class="btn sm" data-act="as-user" data-arg="${u.id}">جرّب كـ ${esc(u.name)}</button>`) });
   if (live) setTimeout(loadRequests);
@@ -653,16 +698,50 @@ ACTS['usr-pw'] = id => { const u = S().users.find(x => x.id === id); modal('با
   { save: async () => { await U.api('resetPassword', { id, password: val('up-p') }); toast('اتغير الباسورد', 'ok'); } }); };
 function genPw() { const c = 'abcdefghjkmnpqrstuvwxyz23456789'; let p = ''; const a = new Uint32Array(10); crypto.getRandomValues(a); a.forEach(x => { p += c[x % c.length]; }); return p.slice(0, 4) + '-' + p.slice(4, 8) + p.slice(8); }
 async function reloadLive() { const { data } = await U.sb().from('erp_state').select('version,state').eq('id', 1).single(); E.setState(data.state); E.S.currentUser = U.profile().user_id; }
+/* ========== EDIT REQUESTS (owner decides; Telegram has the same buttons) ========== */
+PAGES.requests = () => {
+  const s = S(), tb = tabs('rq', [['pending', 'مستنية موافقة'], ['done', 'اتعامل معاها']], 'pending');
+  const ch = (s.docs.changes || []).map(c => ({ kind: 'chg', id: c.id, no: c.no, what: E.CHANGE_OPS[c.op], text: c.text, reason: c.reason, by: c.by, at: c.at, status: c.status }));
+  const co = s.docs.corrections.map(c => ({ kind: 'cor', id: c.id, no: c.no, what: 'تصحيح صرف', text: `${(s.docs.batches.find(b => b.id === c.batchId) || {}).no || ''} · ${E.item(c.itemId).name}: ${qtyf(c.oldQty, E.item(c.itemId).unit)} ← ${qtyf(c.newQty, E.item(c.itemId).unit)}`, reason: c.reason, by: c.by, at: c.at, status: c.status }));
+  const rows = [...ch, ...co].filter(r => (tb.cur === 'pending') === (r.status === 'pending')).sort((a, b) => (a.at < b.at ? 1 : -1));
+  page('طلبات التعديل', `<div class="note info">أي تعديل على حاجة اتسجلت (استلام، فاتورة، مرتجع، صرف) من غير المالك بيستنى هنا. نفس الطلب بيوصلك على تليجرام بزرار «موافقة» و«رفض».</div><div class="bar">${tb.html}</div>
+    <div class="card"><div class="bd">${table('rq-' + tb.cur, [{ t: 'الرقم', f: r => `<span class="mono">${esc(r.no)}</span>` }, { t: 'النوع', f: r => `<span class="pill info">${esc(r.what)}</span>` }, { t: 'التفاصيل', w: 1, f: r => tx(r.text) }, { t: 'السبب', f: r => esc(r.reason || '') }, { t: 'من', f: r => esc(E.userName(r.by)) }, { t: 'الوقت', f: r => tf(r.at) },
+      { t: '', f: r => r.status === 'pending' ? `<button class="btn sm ok" data-act="rq-ok" data-arg="${r.kind}|${r.id}">موافقة</button> <button class="btn sm dan" data-act="rq-no" data-arg="${r.kind}|${r.id}">رفض</button>` : r.status === 'approved' ? '<span class="pill ok">اتوافق</span>' : '<span class="pill bad">اترفض</span>' }], rows, { empty: tb.cur === 'pending' ? 'مفيش طلبات مستنية' : 'لسه مفيش' })}</div></div>`);
+};
+const rqDo = (arg, yes) => { const [k, id] = arg.split('|'); modal(yes ? 'موافقة على الطلب' : 'رفض الطلب', `<p>${yes ? 'التعديل هيتنفذ على طول ويتسجل باسمك في سجل الحركات. متأكد؟' : 'الطلب هيترفض ومش هيتغير حاجة.'}</p>`, { saveText: yes ? 'أيوه، وافق' : 'ارفض', save: async () => { if (k === 'chg') await E.decideChange(id, yes); else await E.decideCorrection(id, yes); toast(yes ? 'اتوافق واتنفذ' : 'اترفض', 'ok'); } }); };
+ACTS['rq-ok'] = a => rqDo(a, true);
+ACTS['rq-no'] = a => rqDo(a, false);
+
 /* ========== SCREENS PER ROLE (owner) ========== */
 const ACC_ROLES = ['accountant', 'storekeeper', 'supervisor', 'worker', 'packer', 'sales'];
+const accRows = () => U.NAV.flatMap(([g, items]) => items.filter(([id]) => !U.LOCKED.has(id) && id !== 'home').map(([id, t, , roles]) => ({ g, id, t, roles })));
+const roleDefault = (r, x) => ((S().settings.access || {})[x.id] || x.roles.filter(q => q !== 'owner')).includes(r);
 PAGES.access = () => {
-  const a = S().settings.access || {};
-  const rows = U.NAV.flatMap(([g, items]) => items.filter(([id]) => !U.LOCKED.has(id) && id !== 'home').map(([id, t, , roles]) => ({ g, id, t, cur: a[id] || roles.filter(r => r !== 'owner') })));
-  page('الشاشات لكل دور', `<div class="note info">علّم الشاشات اللي كل دور يشوفها في القايمة. إنت (المالك) بتشوف كل حاجة دايمًا، وشاشات المستخدمين والصلاحيات والإعدادات ليك لوحدك.<br>خلّي بالك: فتح شاشة لدور مش بيديله صلاحية العمليات اللي فيها. مثلًا لو فتحت «الخزنة» لأمين المخزن هيشوفها، بس السيستم هيرفض لو حاول يصرف منها.</div>
+  const tb = tabs('acc', [['people', 'لكل شخص'], ['roles', 'لكل دور']], 'people');
+  const ua = S().settings.userAccess || {}, rows = accRows();
+  let body;
+  if (tb.cur === 'people') {
+    const people = S().users.filter(u => u.role !== 'owner' && u.id !== 'bot');
+    body = `<div class="note info">كل شخص بيشوف شاشات دوره، إلا لو حددت له شاشات بنفسك. أي مستخدم جديد بيظهر هنا أول ما يتعمل، فتقدر تحدد هو مين وبيشوف إيه. الصلاحية في العمليات نفسها بتفضل حسب دوره.</div>
+      <div class="card"><div class="bd">${table('accp', [{ t: 'الاسم', f: u => `<span style="display:inline-flex;gap:10px;align-items:center">${U.avatar(u, 'av-sm')}<b>${esc(u.name)}</b></span>` }, { t: 'الدور', f: u => esc(E.ROLES[u.role] ? E.ROLES[u.role].name : u.role) },
+        { t: 'الشاشات', f: u => u.role === 'pending' ? '<span class="pill warn">مستني دور: حدده من «المستخدمين»</span>' : ua[u.id] ? `<span class="pill info">مخصص · ${ua[u.id].length} شاشة</span>` : '<span class="pill mut">زي دوره</span>' },
+        { t: '', f: u => u.role === 'pending' ? `<button class="btn sm" data-go="users">حدد الدور</button>` : `<button class="btn sm" data-act="accp-edit" data-arg="${u.id}">حدد الشاشات</button>${ua[u.id] ? ` <button class="btn sm" data-act="accp-reset" data-arg="${u.id}">زي دوره</button>` : ''}` }], people, { empty: 'مفيش مستخدمين غيرك لسه' })}</div></div>`;
+  } else {
+    const a = S().settings.access || {};
+    body = `<div class="note info">علّم الشاشات اللي كل دور يشوفها في القايمة. إنت (المالك) بتشوف كل حاجة دايمًا، وشاشات المستخدمين والصلاحيات والإعدادات ليك لوحدك.<br>خلّي بالك: فتح شاشة لدور مش بيديله صلاحية العمليات اللي فيها. مثلًا لو فتحت «الخزنة» لأمين المخزن هيشوفها، بس السيستم هيرفض لو حاول يصرف منها.</div>
     <div class="card"><div class="bd"><div class="tw"><table class="t acc-t"><thead><tr><th>الشاشة</th>${ACC_ROLES.map(r => `<th class="n">${esc(E.ROLES[r].name)}</th>`).join('')}</tr></thead><tbody>
-      ${rows.map(x => `<tr><td><b>${esc(x.t)}</b>${x.g ? ` <small class="crumb">${esc(x.g)}</small>` : ''}</td>${ACC_ROLES.map(r => `<td class="n"><input type="checkbox" class="acc-c" data-p="${x.id}" data-r="${r}" ${x.cur.includes(r) ? 'checked' : ''} aria-label="${esc(x.t)} · ${esc(E.ROLES[r].name)}"></td>`).join('')}</tr>`).join('')}
-    </tbody></table></div><div class="bar" style="margin-top:12px"><button class="btn" data-act="acc-reset">رجّع الافتراضي</button><span class="grow"></span><button class="btn p" data-act="acc-save">${ic('check')} حفظ</button></div></div></div>`);
+      ${rows.map(x => `<tr><td><b>${esc(x.t)}</b>${x.g ? ` <small class="crumb">${esc(x.g)}</small>` : ''}</td>${ACC_ROLES.map(r => `<td class="n"><input type="checkbox" class="acc-c" data-p="${x.id}" data-r="${r}" ${(a[x.id] || x.roles.filter(q => q !== 'owner')).includes(r) ? 'checked' : ''} aria-label="${esc(x.t)} · ${esc(E.ROLES[r].name)}"></td>`).join('')}</tr>`).join('')}
+    </tbody></table></div><div class="bar" style="margin-top:12px"><button class="btn" data-act="acc-reset">رجّع الافتراضي</button><span class="grow"></span><button class="btn p" data-act="acc-save">${ic('check')} حفظ</button></div></div></div>`;
+  }
+  page('الصلاحيات', `<div class="bar">${tb.html}</div>${body}`);
 };
+ACTS['accp-edit'] = id => {
+  const u = S().users.find(x => x.id === id), cur = (S().settings.userAccess || {})[id], rows = accRows();
+  modal('شاشات ' + esc(u.name), `<div class="note info">دوره: <b>${esc(E.ROLES[u.role].name)}</b>. علّم الشاشات اللي يشوفها. الرئيسية ظاهرة دايمًا.</div>
+    <div class="acc-list">${rows.map(x => `<label><input type="checkbox" class="accp-c" value="${x.id}" ${(cur ? cur.includes(x.id) : roleDefault(u.role, x)) ? 'checked' : ''}> ${esc(x.t)}${x.g ? ` <small class="crumb">${esc(x.g)}</small>` : ''}</label>`).join('')}</div>`,
+  { saveText: 'حفظ', save: async () => { await E.updateUserAccess({ userId: id, pages: [...document.querySelectorAll('.accp-c:checked')].map(c => c.value) }); toast('اتحفظت شاشات ' + u.name, 'ok'); } });
+};
+ACTS['accp-reset'] = id => run(() => E.updateUserAccess({ userId: id, pages: null }), 'رجع زي دوره');
 ACTS['acc-save'] = () => { const map = {}; document.querySelectorAll('.acc-c').forEach(c => { (map[c.dataset.p] = map[c.dataset.p] || []); if (c.checked) map[c.dataset.p].push(c.dataset.r); }); run(() => E.updateAccess(map), 'اتحفظت الشاشات لكل دور'); };
 ACTS['acc-reset'] = () => run(() => E.updateAccess({}), 'رجعت الشاشات للافتراضي');
 

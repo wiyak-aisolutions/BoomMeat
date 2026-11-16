@@ -89,6 +89,20 @@ async function payDecision(cq: any, chat: string) {
   await tg('editMessageCaption', { chat_id: chat, message_id: cq.message.message_id, caption: caption.slice(0, 1000) });
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: ans === 'ok' ? 'اتسجل الدفع ✅' : 'اتبلغ العميل' });
 }
+// «موافقة» / «رفض» under an edit request (receiving, return, price) or a batch correction: decided as the owner
+// deno-lint-ignore no-explicit-any
+async function requestDecision(cq: any, chat: string) {
+  const [kind, ans, id] = String(cq.data).split(':');
+  const owner = await ownerProfile();
+  if (!owner) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'مفيش حساب مالك' }); return; }
+  const r = kind === 'chg'
+    ? await runOp({ E, db, profile: owner, op: 'decideChange', args: [id, ans === 'ok'], telegram: null, copy: null })
+    : await runOp({ E, db, profile: owner, op: 'decideCorrection', args: [id, ans === 'ok'], telegram: null, copy: null });
+  if (r.status !== 200) { await tg('answerCallbackQuery', { callback_query_id: cq.id, text: String(r.body?.error || 'تعذر').slice(0, 190), show_alert: true }); return; }
+  const text = String(cq.message?.text || '') + (ans === 'ok' ? '\n\n✅ اتوافق عليه واتنفذ' : '\n\n❌ اترفض');
+  await tg('editMessageText', { chat_id: chat, message_id: cq.message.message_id, text: text.slice(0, 4000) });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: ans === 'ok' ? 'اتوافق ✅' : 'اترفض' });
+}
 // The owner asks anything in plain words: stock, cash, sales, orders, alerts, debts, or a forgotten password.
 async function answerOwner(chat: string, text: string, intent = '') {
   const row = await db.load(); E.setState(row.state);
@@ -199,6 +213,7 @@ async function telegramUpdate(u: Record<string, any>) {
     await tg('answerCallbackQuery', { callback_query_id: cq.id }); return;
   }
   if (/^pay:(ok|no):/.test(String(cq.data || ''))) { await payDecision(cq, chat); return; }
+  if (/^(chg|cor):(ok|no):[A-Za-z0-9_-]+$/.test(String(cq.data || ''))) { await requestDecision(cq, chat); return; }
   const qd = String(cq.data || '');
   if (/^q:[a-z]+$/.test(qd)) { await tg('answerCallbackQuery', { callback_query_id: cq.id }); await answerOwner(chat, '', qd.slice(2)); return; }
   if (/^pw[yn]?:/.test(qd)) { await passwordStep(cq, chat, qd); return; }
