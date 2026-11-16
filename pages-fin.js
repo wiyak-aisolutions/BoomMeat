@@ -723,9 +723,10 @@ ACTS['tgv-rm'] = chat => modal('شيل المتابع', '<div class="note bad">�
 ACTS['tg-check'] = async () => { await reloadLive(); U.closeModal(); U.render(); toast(S().settings.tgChat ? 'تليجرام اتوصل ✓' : 'لسه مااتوصلش، دوس Start في البوت', S().settings.tgChat ? 'ok' : 'bad'); };
 ACTS['st-golive'] = () => modal('تصفير الحسابات', `<div class="note bad">هيتمسح ${S().journal.length} قيد و${S().docs.invoices.length} فاتورة و${S().docs.batches.length} تشغيلة وكل أرصدة المخزون. اكتب كلمة <b>تصفير</b> عشان تأكد.</div><input class="f" id="gl-c" autocomplete="off">`,
   { saveText: 'صفّر الحسابات', save: async () => { if (val('gl-c').trim() !== 'تصفير') throw new Error('اكتب كلمة تصفير بالظبط'); await E.resetBooks(); toast('الحسابات اتصفرت، ابدأ بأرصدة البداية', 'ok'); setTimeout(() => U.go('opening')); } });
-// every book in one Excel file: the same sheets as the daily backup sent to Telegram (supabase/functions/_shared/backup.mjs)
+// every book in one Excel file: the same sheets as the daily backup sent to Telegram.
+// The site ships a copy of supabase/functions/_shared/backup.mjs at its top level (pack-site.sh); local preview falls back to the original.
 ACTS['st-xlsx-all'] = () => run(async () => {
-  const [X, mod] = await Promise.all([U.loadXLSX(), import('./supabase/functions/_shared/backup.mjs?v=90')]);
+  const [X, mod] = await Promise.all([U.loadXLSX(), import('./backup.mjs?v=91').catch(() => import('./supabase/functions/_shared/backup.mjs?v=91'))]);
   const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
   for (const sh of mod.backupSheets(E)) {
     const ws = X.utils.aoa_to_sheet(sh.rows);
