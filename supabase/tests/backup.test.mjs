@@ -22,5 +22,6 @@ ok('journal debit = credit', Math.abs(jt[6] - jt[7]) < 0.01 && jt[6] > 0);
 const tb = by('ميزان المراجعة').rows, tbt = tb[tb.length - 1];
 ok('trial balance balanced', Math.abs(tbt[2] - tbt[3]) < 0.01);
 ok('every cell is plain (number/string)', sh.every(x => x.rows.every(r => r.every(c => ['number', 'string'].includes(typeof c)))));
-ok('due at 11:xx once a day', backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-15') && !backupDue({ date: '2026-11-15', time: '10:59' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '12:00' }, ''));
+ok('due at 11:xx once a day', backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '11:05' }, '2026-11-15') && !backupDue({ date: '2026-11-15', time: '10:59' }, '2026-11-14') && !backupDue({ date: '2026-11-15', time: '12:00' }, '2026-11-15'));
+ok('a missed 11:00 is retried later the same day', backupDue({ date: '2026-11-15', time: '12:05' }, '2026-11-14') && backupDue({ date: '2026-11-15', time: '23:05' }, '2026-11-14') && !backupDue({ date: '2026-11-16', time: '00:05' }, '2026-11-15'));
 console.log(`backup checks: ${pass} passed, ${fail} failed`); if (fail) process.exit(1);

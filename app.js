@@ -91,7 +91,7 @@ const NAV = [
   ['الإدارة', [['flow', 'مسار البضاعة', 'flow', ALL], ['audit', 'سجل الحركات', 'log', ['owner', 'accountant']], ['users', 'المستخدمين والصلاحيات', 'shield', ['owner']], ['access', 'الشاشات لكل دور', 'lock', ['owner']], ['settings', 'الإعدادات', 'gear', ['owner']]]],
 ];
 const ACCESS = {}; NAV.forEach(([, items]) => items.forEach(([id, t, , roles]) => { ACCESS[id] = { t, roles }; }));
-const DETAIL_PARENT = { butchery: 'cutting', order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
+const DETAIL_PARENT = { bill: 'customers', butchery: 'cutting', order: 'orders', batch: 'batches', invoice: 'invoices', customer: 'customers', supplier: 'suppliers', purchase: 'purchases', newinvoice: 'invoices' };
 const QUICK = [
   ['b-new', 'تشغيلة جديدة', 'افتح تشغيلة برقم', 'batch', ['owner', 'supervisor']],
   ['go:worker', 'صرف خامات', 'من التابلت على تشغيلة', 'hand', ['owner', 'supervisor', 'worker']],
@@ -772,7 +772,7 @@ async function bootLive() {
 window.UI = { NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
 // WhatsApp chat button for any phone number on a profile (Egyptian mobiles: 01xxxxxxxxx → 201xxxxxxxxx)
 window.UI.waLink = ph => { const d = String(ph || '').replace(/\D/g, ''); const n = /^01\d{9}$/.test(d) ? '2' + d : /^20?1\d{9}$/.test(d) ? d.replace(/^20?/, '20') : ''; return n ? `<a class="btn wa" href="https://wa.me/${n}" target="_blank" rel="noopener">واتساب</a>` : ''; };
-window.UI.LIVE = LIVE; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
+window.UI.LIVE = LIVE; window.UI.loadXLSX = loadXLSX; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
 window.UI.profile = () => PROFILE; window.UI.pendingRequests = () => PENDING_REQ; window.UI.countRequests = countRequests; window.UI.sb = () => SB;
 /* ---------- motion: page entrance, count-up numbers, cursor light + 3D tilt ---------- */
 const CALM = matchMedia('(prefers-reduced-motion: reduce)');

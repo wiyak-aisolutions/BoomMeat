@@ -186,7 +186,7 @@ PAGES.invoices = () => {
   const s = S(), cost = canCost();
   const p = period('inv', 'month');
   const rows = s.docs.invoices.filter(v => v.date >= p.from && v.date <= p.to && match('iq', v.no, E.partner(v.customerId).name)).slice().reverse();
-  const cols = [{ t: 'الرقم', f: v => `<b class="mono">${esc(v.no)}</b>` }, { t: 'التاريخ', f: v => df(v.date) }, { t: 'العميل', f: v => esc(E.partner(v.customerId).name) },
+  const cols = [{ t: 'الرقم', f: v => `<b class="mono">${esc(v.no)}</b>` }, { t: 'التاريخ', f: v => df(v.date) }, { t: 'العميل', f: v => esc(E.partner(v.customerId).name) + (v.branchName ? ` <small class="crumb">· ${esc(v.branchName)}</small>` : '') },
     { t: 'النوع', f: v => v.kind === 'wholesale' ? '<span class="pill red">جملة</span>' : '<span class="pill yel">قطاعي</span>' }, { t: 'الدفع', f: v => v.method === 'credit' ? '<span class="pill warn">آجل</span>' : `<span class="pill ok">${E.payLabel(v.method)}</span>` },
     { t: 'الكمية', n: 1, f: v => kgf(sumBy(v.lines, l => l.qty)) + ' كجم' },  { t: 'الإجمالي', n: 1, f: v => `<b>${fm(v.total)}</b>` }];
   if (U.isOwner()) cols.push({ t: 'الربح', n: 1, f: v => `<span style="color:var(--${v.net - v.cost >= 0 ? 'ok' : 'bad'})">${fm(v.net - v.cost)}</span>` });
@@ -199,13 +199,14 @@ PAGES.invoices = () => {
 };
 
 /* ===== Sales screen (point of sale): products in stock → cart → confirm → invoice ===== */
-const NI = { cust: null, lines: [], method: null, discount: '', q: '', grp: '' };
+const NI = { cust: null, lines: [], method: null, discount: '', q: '', grp: '', branch: '' };
 const fgAvail = (id, z) => Math.floor(E.available(id, E.whs('fg'), z) / z);
 PAGES.newinvoice = () => {
   const s = S();
   const custs = s.partners.filter(p => p.type === 'customer');
   if (!NI.cust || !custs.some(c => c.id === NI.cust)) NI.cust = custs[0].id;
   const c = E.partner(NI.cust);
+  const brs = c.branches || []; if (!brs.some(b => b.id === NI.branch)) NI.branch = '';
   const methods = c.terms === 'credit' ? ['credit', ...U.moneyAccs('in')] : U.moneyAccs('in');
   if (!methods.includes(NI.method)) NI.method = methods[0];
   // catalog
@@ -246,6 +247,7 @@ PAGES.newinvoice = () => {
     <aside class="pos-cart card" id="cart"><div class="bd">
       <div class="hd" style="padding:0 0 10px"><h3>السلة</h3><span class="sub">${count ? count + ' عبوة' : 'فاضية'}</span>${count ? '<div class="tools"><button class="btn sm" data-act="ni-reset">فضّي السلة</button></div>' : ''}</div>
       <div class="fgrid one"><label class="fld"><span>العميل</span><select class="f" id="ni-c">${partnerOptions('customer', NI.cust)}</select></label>
+        ${brs.length ? `<label class="fld"><span>الفرع</span><select class="f" id="ni-b" required><option value="">اختار الفرع…</option>${brs.map(b => `<option value="${b.id}" ${b.id === NI.branch ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>` : ''}
         <div class="pos-meta"><span class="pill ${c.kind === 'wholesale' ? 'info' : 'warn'}">${c.kind === 'wholesale' ? 'أسعار الجملة' : 'أسعار القطاعي'}</span>${E.partnerBalance && c.terms === 'credit' ? `<span class="pill mut">عليه ${fm0(E.partnerBalance(c.id))} ج</span>` : ''}</div>
         <div class="fgrid two"><label class="fld"><span>الدفع</span><select class="f" id="ni-m">${methodOptions(methods, NI.method)}</select></label>
         <label class="fld"><span>التاريخ</span><input class="f" id="ni-d" type="date" value="${E.today()}" max="${E.today()}"></label></div></div>
@@ -260,7 +262,8 @@ PAGES.newinvoice = () => {
     ${count ? `<button class="pos-bar" data-act="ni-cart"><span>${ic('bill')} السلة · ${count} عبوة</span><b>${fm(total)} ج</b></button>` : ''}
   </div>`, { crumb: '<a href="#invoices">الفواتير</a> / بيع جديد' });
   const mb = U.content();
-  document.getElementById('ni-c').onchange = e => { NI.cust = e.target.value; NI.method = null; U.render(); };
+  document.getElementById('ni-c').onchange = e => { NI.cust = e.target.value; NI.method = null; NI.branch = ''; U.render(); };
+  const nb = document.getElementById('ni-b'); if (nb) nb.onchange = e => { NI.branch = e.target.value; };
   document.getElementById('ni-m').onchange = e => { NI.method = e.target.value; };
   const x = document.getElementById('ni-x'); if (x) x.onchange = e => { NI.discount = e.target.value; U.render(); };
   const qi = document.getElementById('ni-q'); let tq; qi.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { NI.q = e.target.value; U.render(); const n = document.getElementById('ni-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
@@ -276,7 +279,8 @@ ACTS['ni-reset'] = () => { NI.lines = []; NI.discount = ''; U.render(); };
 ACTS['ni-cart'] = () => document.getElementById('cart').scrollIntoView({ behavior: 'smooth', block: 'start' });
 ACTS['ni-save'] = async () => {
   const lines = NI.lines.map(l => ({ productId: l.productId, packSize: l.packSize, count: l.count, ...(l.price > 0 ? { pricePerKg: l.price } : {}) }));
-  const v = await run(() => E.invoice({ date: val('ni-d'), customerId: NI.cust, lines, discount: toP(NI.discount || '0') || 0, method: NI.method }), 'اتأكد الأوردر واتعملت الفاتورة');
+  const nb = document.getElementById('ni-b'); if (nb && !nb.value) { nb.focus(); toast('اختار الفرع الأول', 'bad'); return; }
+  const v = await run(() => E.invoice({ date: val('ni-d'), customerId: NI.cust, lines, discount: toP(NI.discount || '0') || 0, method: NI.method, ...(nb ? { branchId: nb.value } : {}) }), 'اتأكد الأوردر واتعملت الفاتورة');
   if (v) { NI.lines = []; NI.discount = ''; INV_PRINT = v.id; U.go('invoice', v.id); }
 };
 let INV_PRINT = null; // open the print dialog once, right after a sale is confirmed
@@ -290,7 +294,7 @@ PAGES.invoice = id => {
     <div class="inv">
       <div class="inv-h"><div><img src="boom-logo.png" alt="Boom Meat"><div><b>${esc(co.name)}</b></div><small>${esc(co.address)}</small><br><small>رقم التسجيل الضريبي: ${esc(co.taxId)}</small><br><small dir="ltr">${esc(co.phone)}</small></div>
         <div class="r"><b style="font-size:20px">${v.vat ? 'فاتورة ضريبية' : 'فاتورة'}</b><div>رقم: <span class="mono">${esc(v.no)}</span></div><div>التاريخ: ${esc(v.date)}</div><div>${esc(v.at.slice(11, 16))}</div></div></div>
-      <div class="inv-m"><div><small>العميل</small><b>${esc(c.name)}</b><br>${c.kind === 'wholesale' ? 'جملة' : 'قطاعي'} · ${E.payLabel(v.method)}${c.taxId ? `<br>رقم ضريبي: ${esc(c.taxId)}` : ''}${c.phone ? `<br><span dir="ltr">${esc(c.phone)}</span>` : ''}</div>
+      <div class="inv-m"><div><small>العميل</small><b>${esc(c.name)}</b>${v.branchName ? `<br>فرع: <b>${esc(v.branchName)}</b>` : ''}<br>${c.kind === 'wholesale' ? 'جملة' : 'قطاعي'} · ${E.payLabel(v.method)}${c.taxId ? `<br>رقم ضريبي: ${esc(c.taxId)}` : ''}${c.phone ? `<br><span dir="ltr">${esc(c.phone)}</span>` : ''}</div>
         <div><small>بيانات الطلب</small>استلام من المصنع<br>بواسطة: ${esc(E.userName(v.by))}<br>تشغيلات: ${[...new Set(v.lines.flatMap(l => l.parts.map(p => (s.lots.find(x => x.id === p.lotId) || {}).src).filter(Boolean).map(x => x.no)))].map(esc).join('، ')}</div></div>
       <table><thead><tr><th>#</th><th>الصنف</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">الإجمالي</th></tr></thead>
         <tbody>${v.lines.map((l, k) => `<tr><td>${k + 1}</td><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n">${fm(l.amount)}</td></tr>`).join('')}</tbody></table>
@@ -307,6 +311,28 @@ ACTS['inv-collect'] = id => {
   <label class="fld"><span>ملاحظة</span><input class="f" id="ic-n"></label>`, { saveText: 'تسجيل التحصيل', save: async () => { await E.receipt({ date: val('ic-d'), customerId: v.customerId, amount: toP(val('ic-a')), method: val('ic-m'), memo: val('ic-n'), invoiceId: v.id }); toast('اتسجل التحصيل', 'ok'); } });
 };
 
+/* ========== CONSOLIDATED BILL (customer with branches) ========== */
+const BILL = { from: '', to: '' };
+ACTS['bill-open'] = id => modal('فاتورة مجمعة للفروع', `<div class="note info">فاتورة واحدة فيها مسحوبات كل فرع في الفترة دي، وإجمالي كل فرع، والإجمالي الكلي.</div>
+  <div class="fgrid"><label class="fld"><span>من</span><input class="f" id="bl-f" type="date" value="${E.monthStart(E.today())}" max="${E.today()}"></label><label class="fld"><span>إلى</span><input class="f" id="bl-t" type="date" value="${E.today()}" max="${E.today()}"></label></div>`,
+  { saveText: 'اعرض الفاتورة', save: async () => { const from = val('bl-f'), to = val('bl-t'); if (!from || !to || from > to) throw new Error('الفترة غير صحيحة'); BILL.from = from; BILL.to = to; setTimeout(() => U.go('bill', id)); } });
+PAGES.bill = id => {
+  const s = S(); if (!BILL.from) { BILL.from = E.monthStart(E.today()); BILL.to = E.today(); }
+  const b = E.branchBill({ customerId: id, from: BILL.from, to: BILL.to }), co = s.settings.company;
+  page(`فاتورة مجمعة · ${esc(b.customer.name)}`, `<div class="bar no-print"><button class="btn p" data-act="print">${ic('print')} طباعة</button><button class="btn" data-act="bill-open" data-arg="${id}">غيّر الفترة</button><span class="pill ${b.due > 0 ? 'warn' : 'ok'}">اتحصل ${fm(b.paid)}${b.due > 0 ? ` · الباقي ${fm(b.due)}` : ''}</span></div>
+    <div class="inv">
+      <div class="inv-h"><div><img src="boom-logo.png" alt="Boom Meat"><div><b>${esc(co.name)}</b></div><small>${esc(co.address)}</small><br><small dir="ltr">${esc(co.phone)}</small></div>
+        <div class="r"><b style="font-size:20px">فاتورة مجمعة</b><div>الفترة: ${esc(b.from)} ← ${esc(b.to)}</div><div>${b.count} توريدة · ${b.branches.length} فرع</div></div></div>
+      <div class="inv-m"><div><small>العميل</small><b>${esc(b.customer.name)}</b>${b.customer.taxId ? `<br>رقم ضريبي: ${esc(b.customer.taxId)}` : ''}${b.customer.phone ? `<br><span dir="ltr">${esc(b.customer.phone)}</span>` : ''}</div>
+        <div><small>رصيد الحساب كله النهارده</small><b>${fm(b.balance)} ج</b></div></div>
+      ${b.branches.length ? b.branches.map(br => `<table class="bill-br"><thead><tr><th colspan="4">فرع ${esc(br.name)}</th></tr><tr><th>الفاتورة</th><th>التاريخ</th><th class="n">الكمية</th><th class="n">الإجمالي</th></tr></thead>
+        <tbody>${br.invoices.map(v => `<tr><td class="mono">${esc(v.no)}</td><td>${esc(v.date)}</td><td class="n">${kgf(v.kg)} كجم</td><td class="n">${fm(v.total)}</td></tr>`).join('')}
+        <tr class="sub"><td colspan="2"><b>إجمالي ${esc(br.name)}</b></td><td class="n"><b>${kgf(br.kg)} كجم</b></td><td class="n"><b>${fm(br.total)}</b></td></tr></tbody></table>`).join('') : '<div class="empty">مفيش توريدات للفروع في الفترة دي.</div>'}
+      <div class="inv-f"><div></div><div class="inv-t"><div><span>عدد الفروع</span><span>${b.branches.length}</span></div><div><span>اتحصل</span><span>${fm(b.paid)}</span></div><div class="g"><span>إجمالي مسحوبات كل الفروع</span><span>${fm(b.total)} ج</span></div>${b.due > 0 ? `<div><span>الباقي على الفترة</span><span>${fm(b.due)}</span></div>` : ''}</div></div>
+      <div style="display:flex;gap:40px;font-size:12.5px;color:#666;padding-top:10px"><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المستلم</span><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المسؤول</span></div>
+    </div>`, { crumb: `<a href="#customers">العملاء</a> / <a href="#customer/${id}">${esc(b.customer.name)}</a> / فاتورة مجمعة` });
+};
+
 /* ========== CUSTOMERS ========== */
 PAGES.customers = () => {
   const s = S(), ms = E.monthStart(E.today());
@@ -321,11 +347,11 @@ PAGES.customer = id => {
   const prod = {}; invs.forEach(v => v.lines.forEach(l => { prod[l.productId] = (prod[l.productId] || 0) + l.qty; }));
   page(esc(p.name), `<div class="kpis"><div class="kpi main"><small>الرصيد المستحق عليه</small><b>${fm0(E.partnerBalance(id))} <em>ج</em></b><span class="t">${p.terms === 'credit' ? 'عميل آجل' : 'عميل كاش'}</span></div>
       <div class="kpi"><small>مشتريات الشهر</small><b>${fm0(sumBy(invs.filter(v => v.date >= ms), v => v.total))} <em>ج</em></b></div><div class="kpi"><small>إجمالي المشتريات</small><b>${fm0(sumBy(invs, v => v.total))} <em>ج</em></b><span class="t">${invs.length} فاتورة</span></div></div>
-    <div class="bar"><span class="grow"></span>${['owner', 'accountant', 'sales'].includes(U.role()) ? `<button class="btn p" data-act="sale-to" data-arg="${id}">${ic('plus')} بيع للعميل ده</button><button class="btn" data-act="rc-new" data-arg="${id}">${ic('cash')} تحصيل</button>` : ''}${U.waLink(p.phone)}<button class="btn" data-act="partner-edit" data-arg="${id}">تعديل البيانات</button></div>
-    <div class="grid g-main"><div class="card"><div class="hd"><h3>الفواتير</h3></div><div class="bd">${table('cinv', [{ t: 'الرقم', f: v => `<span class="mono">${esc(v.no)}</span>` }, { t: 'التاريخ', f: v => df(v.date) }, { t: 'الأصناف', f: v => v.lines.map(l => `${esc(E.item(l.productId).name)} ${l.count}×${packName(l.packSize)}`).join('، ') }, { t: 'الدفع', f: v => E.payLabel(v.method) }, { t: 'الإجمالي', n: 1, f: v => `<b>${fm(v.total)}</b>` }], invs.slice().reverse(), { onRow: v => 'invoice/' + v.id })}</div></div>
+    <div class="bar"><span class="grow"></span>${['owner', 'accountant', 'sales'].includes(U.role()) ? `<button class="btn p" data-act="sale-to" data-arg="${id}">${ic('plus')} بيع للعميل ده</button><button class="btn" data-act="rc-new" data-arg="${id}">${ic('cash')} تحصيل</button>` : ''}${U.waLink(p.phone)}${(p.branches || []).length ? `<button class="btn" data-act="bill-open" data-arg="${id}">${ic('bill')} فاتورة مجمعة للفروع</button>` : ''}<button class="btn" data-act="partner-edit" data-arg="${id}">تعديل البيانات</button></div>
+    <div class="grid g-main"><div class="card"><div class="hd"><h3>الفواتير</h3></div><div class="bd">${table('cinv', [{ t: 'الرقم', f: v => `<span class="mono">${esc(v.no)}</span>` }, { t: 'التاريخ', f: v => df(v.date) }, ...((p.branches || []).length ? [{ t: 'الفرع', f: v => esc(v.branchName || '') }] : []), { t: 'الأصناف', f: v => v.lines.map(l => `${esc(E.item(l.productId).name)} ${l.count}×${packName(l.packSize)}`).join('، ') }, { t: 'الدفع', f: v => E.payLabel(v.method) }, { t: 'الإجمالي', n: 1, f: v => `<b>${fm(v.total)}</b>` }], invs.slice().reverse(), { onRow: v => 'invoice/' + v.id })}</div></div>
       <div class="card"><div class="hd"><h3>بيشتري إيه</h3><span class="sub">كجم</span></div><div class="bd">${hbars(Object.entries(prod).sort((a, b) => b[1] - a[1]).map(([k, q]) => ({ label: E.item(k).name, v: q })), v => kgf(v))}
         <div class="kv" style="margin-top:14px"><div><span>التليفون</span><b class="mono">${esc(p.phone || '—')}</b></div><div><span>رقم ضريبي</span><b>${esc(p.taxId || '—')}</b></div></div></div></div></div>
-    <div class="card"><div class="hd"><h3>كشف الحساب</h3></div><div class="bd">${table('cst', [{ t: 'التاريخ', f: r => df(r.date) }, { t: 'القيد', f: r => `<span class="mono">${esc(r.no)}</span>` }, { t: 'البيان', f: r => tx(r.memo) }, { t: 'مدين', n: 1, f: r => r.dr ? fm(r.dr) : '' }, { t: 'دائن', n: 1, f: r => r.cr ? fm(r.cr) : '' }, { t: 'الرصيد', n: 1, f: r => `<b>${fm(r.run)}</b>` }], st.slice().reverse())}</div></div>`, { crumb: '<a href="#customers">العملاء</a>' });
+    <div class="card"><div class="hd"><h3>كشف الحساب</h3></div><div class="bd">${table('cst', [{ t: 'التاريخ', f: r => df(r.date) }, { t: 'القيد', f: r => `<span class="mono">${esc(r.no)}</span>` }, ...((p.branches || []).length ? [{ t: 'الفرع', f: r => esc(r.branch || '') }] : []), { t: 'البيان', f: r => tx(r.memo) }, { t: 'مدين', n: 1, f: r => r.dr ? fm(r.dr) : '' }, { t: 'دائن', n: 1, f: r => r.cr ? fm(r.cr) : '' }, { t: 'الرصيد', n: 1, f: r => `<b>${fm(r.run)}</b>` }], st.slice().reverse())}</div></div>`, { crumb: '<a href="#customers">العملاء</a>' });
 };
 function partnerForm(p, type) {
   p = p || { type, kind: 'wholesale', terms: 'credit', items: [] };
@@ -338,9 +364,10 @@ function partnerForm(p, type) {
     ${p.type === 'customer' ? `<label class="fld"><span>النوع (قايمة الأسعار)</span><select class="f" id="pf-k"><option value="wholesale" ${p.kind === 'wholesale' ? 'selected' : ''}>جملة · مطعم أو محل</option><option value="retail" ${p.kind === 'retail' ? 'selected' : ''}>قطاعي · فرد</option></select></label>
     <label class="fld"><span>التعامل</span><select class="f" id="pf-t"><option value="credit" ${p.terms === 'credit' ? 'selected' : ''}>آجل</option><option value="cash" ${p.terms === 'cash' ? 'selected' : ''}>كاش</option></select></label>` : ''}
     <label class="fld"><span>الرقم الضريبي</span><input class="f" id="pf-tx" value="${esc(p.taxId || '')}" dir="ltr"></label></div>
+    ${p.type === 'customer' ? `<label class="fld"><span>الفروع (لو العميل ليه أكتر من فرع)</span><textarea class="f" id="pf-br" style="min-height:90px" placeholder="المقطم شارع 9 | العنوان | التليفون">${esc((p.branches || []).map(b => [b.name, b.address, b.phone].filter((x, i) => x || i === 0).join(' | ')).join('\n'))}</textarea></label><div class="crumb">كل فرع في سطر: <b>الاسم</b> وبعدين العنوان والتليفون لو موجودين. كل الفروع على حساب واحد، وفي البيع بتختار الفرع، وتقدر تطلع فاتورة مجمعة بكل الفروع.</div>` : ''}
     ${p.type === 'supplier' ? `<div><b>الأصناف اللي بيورّدها</b><div class="crumb">في الاستلام هتظهر الأصناف دي بس، فمحدش يسجل صنف من مورد غلط.</div>${supItems()}</div>` : ''}`;
 }
-const readPartner = (type, id) => ({ id, type, name: val('pf-n'), phone: val('pf-ph'), kind: type === 'customer' ? val('pf-k') : null, terms: type === 'customer' ? val('pf-t') : 'credit', taxId: val('pf-tx'), items: type === 'supplier' ? [...document.querySelectorAll('.pf-i:checked')].map(x => x.value) : [] });
+const readPartner = (type, id) => ({ id, type, name: val('pf-n'), phone: val('pf-ph'), kind: type === 'customer' ? val('pf-k') : null, terms: type === 'customer' ? val('pf-t') : 'credit', taxId: val('pf-tx'), ...(type === 'customer' && document.getElementById('pf-br') ? { branches: val('pf-br').split(/\r?\n/).map(l => l.split('|').map(x => x.trim())).filter(c => c[0]).map(c => ({ name: c[0], address: c[1] || '', phone: c[2] || '' })) } : {}), items: type === 'supplier' ? [...document.querySelectorAll('.pf-i:checked')].map(x => x.value) : [] });
 ACTS['pf-all'] = g => { const boxes = [...document.querySelectorAll(`.pf-grid[data-g="${g}"] .pf-i`)]; const on = !boxes.every(b => b.checked); boxes.forEach(b => { b.checked = on; }); };
 ACTS['partner-new'] = type => modal(type === 'customer' ? 'عميل جديد' : 'مورد جديد', partnerForm(null, type), { wide: type === 'supplier', save: async () => { await E.savePartner(readPartner(type)); toast('اتضاف', 'ok'); } });
 ACTS['partner-edit'] = id => { const p = E.partner(id); modal('تعديل ' + esc(p.name), partnerForm(p), { wide: p.type === 'supplier', save: async () => { await E.savePartner(readPartner(p.type, id)); toast('اتحفظ', 'ok'); } }); };
@@ -657,7 +684,7 @@ PAGES.settings = () => {
     <div class="card"><div class="hd"><h3>بدء التشغيل الفعلي</h3></div><div class="bd" style="display:flex;flex-direction:column;gap:10px">
       <div class="note bad">بعد ما تخلصوا تجربة: الزرار ده بيمسح <b>كل الحركات</b> (القيود، الفواتير، التشغيلات، المخزون، أرصدة البداية) ويرجّع الحسابات صفر. الأصناف والأسعار والوصفات والعملاء والموردين والمستخدمين بيفضلوا زي ما هم. والسيرفر بيحتفظ بنسخة من اللي قبل التصفير.</div>
       <div><button class="btn dan" data-act="st-golive">تصفير الحسابات وبدء التشغيل</button></div></div></div>
-    <div class="card"><div class="hd"><h3>البيانات</h3></div><div class="bd bar"><button class="btn" data-act="st-export">تنزيل نسخة احتياطية (JSON)</button>${U.LIVE ? '<span class="crumb">السيرفر كمان بيحفظ نسخة كاملة كل يوم تلقائي.</span>' : '<button class="btn dan" data-act="st-reset">إعادة البيانات التجريبية من الأول</button>'}</div></div>`);
+    <div class="card"><div class="hd"><h3>البيانات</h3></div><div class="bd bar"><button class="btn p" data-act="st-xlsx-all">${ic('download')} نزّل كل حاجة Excel</button><button class="btn" data-act="st-export">تنزيل نسخة احتياطية (JSON)</button>${U.LIVE ? '<span class="crumb">السيرفر كمان بيحفظ نسخة كاملة كل يوم تلقائي.</span>' : '<button class="btn dan" data-act="st-reset">إعادة البيانات التجريبية من الأول</button>'}</div></div>`);
   if (U.LIVE) setTimeout(loadViewers);
 };
 ACTS['st-save'] = () => run(async () => {
@@ -696,6 +723,17 @@ ACTS['tgv-rm'] = chat => modal('شيل المتابع', '<div class="note bad">�
 ACTS['tg-check'] = async () => { await reloadLive(); U.closeModal(); U.render(); toast(S().settings.tgChat ? 'تليجرام اتوصل ✓' : 'لسه مااتوصلش، دوس Start في البوت', S().settings.tgChat ? 'ok' : 'bad'); };
 ACTS['st-golive'] = () => modal('تصفير الحسابات', `<div class="note bad">هيتمسح ${S().journal.length} قيد و${S().docs.invoices.length} فاتورة و${S().docs.batches.length} تشغيلة وكل أرصدة المخزون. اكتب كلمة <b>تصفير</b> عشان تأكد.</div><input class="f" id="gl-c" autocomplete="off">`,
   { saveText: 'صفّر الحسابات', save: async () => { if (val('gl-c').trim() !== 'تصفير') throw new Error('اكتب كلمة تصفير بالظبط'); await E.resetBooks(); toast('الحسابات اتصفرت، ابدأ بأرصدة البداية', 'ok'); setTimeout(() => U.go('opening')); } });
+// every book in one Excel file: the same sheets as the daily backup sent to Telegram (supabase/functions/_shared/backup.mjs)
+ACTS['st-xlsx-all'] = () => run(async () => {
+  const [X, mod] = await Promise.all([U.loadXLSX(), import('./supabase/functions/_shared/backup.mjs?v=90')]);
+  const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+  for (const sh of mod.backupSheets(E)) {
+    const ws = X.utils.aoa_to_sheet(sh.rows);
+    ws['!cols'] = sh.rows[0].map((_, i) => ({ wch: Math.min(50, Math.max(10, ...sh.rows.map(r => String(r[i] ?? '').length + 2))) }));
+    X.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31));
+  }
+  X.writeFile(wb, `boom-meat-all-${E.today()}.xlsx`);
+}, 'اتنزل الملف');
 ACTS['st-export'] = () => { const b = new Blob([E.exportJSON()], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `boom-erp-${E.today()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
 ACTS['st-reset'] = () => modal('إعادة البيانات التجريبية', '<div class="note bad">كل العمليات اللي اتسجلت هتتمسح، والسيستم هيرجع للبيانات التجريبية من الأول.</div>', { saveText: 'أيوه، رجّعها', save: async () => { await E.reset(); toast('البيانات رجعت من الأول', 'ok'); } });
 })();

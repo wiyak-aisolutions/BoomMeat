@@ -69,4 +69,5 @@ export function backupSheets(E) {
 }
 
 // should the hourly trigger send now? 11:00 Cairo, once per day
-export const backupDue = (cairo, lastDay) => cairo.time.slice(0, 2) === '11' && lastDay !== cairo.date;
+// due from 11:00 Cairo until it goes out: a failed hour (Telegram down) is retried the next hour, not skipped for the day
+export const backupDue = (cairo, lastDay) => cairo.time.slice(0, 2) >= '11' && lastDay !== cairo.date;

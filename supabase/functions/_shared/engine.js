@@ -617,7 +617,7 @@ const OLD_BAG = s => !!S.items.find(i => i.cat === 'pack' && i.packFor === s); /
 
 function priceFor(p, cust) { return cust.kind === 'wholesale' ? p.priceWholesale : p.priceRetail; }
 let orderCredit = false; // set only while decideOrder approves a WhatsApp order (pay on delivery)
-function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = false, deliveryFee = 0 }) {
+function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = false, deliveryFee = 0, branchId }) {
   return tx(() => {
     perm('sales', 'accountant'); checkDate(date);
     const c = partner(customerId); need(c.type === 'customer', 'اختار عميل');
@@ -626,8 +626,12 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
     lines = (lines || []).filter(l => l.count > 0);
     need(lines.length, 'أضف صنف واحد على الأقل');
     need(isInt(discount) && discount >= 0, 'الخصم غير صحيح');
+    // a customer with branches (e.g. Healthy): every delivery names its branch; all of them share one account
+    const br = c.branches && c.branches.length ? c.branches.find(b => b.id === branchId) : null;
+    need(!(c.branches && c.branches.length) || br || orderCredit, `اختار فرع ${c.name}`); // a WhatsApp order has no branch picker: it goes on the main account
     const no = nextNo('INV', 5);
     const doc = { id: uid('V'), no, date, customerId, kind: c.kind, method, lines: [], gross: 0, discount, net: 0, vat: 0, total: 0, cost: 0, by: S.currentUser, at: stamp(date) };
+    if (br) { doc.branchId = br.id; doc.branchName = br.name; }
     for (const ln of lines) {
       const p = item(ln.productId); need(p.cat === 'product', 'صنف غير قابل للبيع');
       need(packsOf(p).includes(ln.packSize) || (isInt(ln.packSize) && available(p.id, whs('fg'), ln.packSize) > 0), 'حجم العبوة مش متاح للمنتج ده');
@@ -654,7 +658,7 @@ function invoice({ date, customerId, lines, discount = 0, method, vatIncluded = 
     }
     const revAcc = c.kind === 'wholesale' ? '4102' : '4101';
     const ref = { type: 'invoice', id: doc.id, no };
-    doc.je = post({ date, type: 'sale', ref, memo: `فاتورة بيع ${no} · ${c.name}`, lines: [
+    doc.je = post({ date, type: 'sale', ref, memo: `فاتورة بيع ${no} · ${c.name}${br ? ' · فرع ' + br.name : ''}`, lines: [
       { acc: '1201', dr: doc.total, partner: c.id }, { acc: revAcc, cr: doc.net - (doc.deliveryNet || 0) }, ...(doc.deliveryNet ? [{ acc: '4103', cr: doc.deliveryNet }] : []), { acc: '2102', cr: doc.vat },
       { acc: '5101', dr: doc.cost }, { acc: '1305', cr: doc.cost }] }).no;
     if (method !== 'credit') {
@@ -1311,6 +1315,18 @@ function saveItem(o) {
     return it;
   });
 }
+// branches of one customer: [{ id, name, address, phone }]; ids are kept so old invoices still point at their branch
+function cleanBranches(list, old) {
+  need(list.length <= 200, 'الفروع كتير أوي');
+  const out = [];
+  for (const b of list) {
+    const name = String((b && b.name) || '').trim().slice(0, 80); if (!name) continue;
+    need(!out.some(x => x.name === name), `الفرع «${name}» متكرر`);
+    const prev = (b.id && old.find(x => x.id === b.id)) || old.find(x => x.name === name);
+    out.push({ id: prev ? prev.id : uid('BR'), name, address: String(b.address || '').trim().slice(0, 300), phone: String(b.phone || '').trim().slice(0, 40) });
+  }
+  return out;
+}
 function savePartner(o) {
   return tx(() => {
     perm('sales', 'accountant', 'storekeeper');
@@ -1327,11 +1343,14 @@ function savePartner(o) {
       const p = partner(o.id);
       const added = items.filter(i => !(p.items || []).includes(i)), removed = (p.items || []).filter(i => !items.includes(i));
       Object.assign(p, { name: o.name.trim(), phone: o.phone || '', kind: o.kind, terms: o.terms, taxId: o.taxId || '', supplies: o.supplies || '' }); if (o.type === 'supplier') p.items = items;
+      if (o.type === 'customer' && Array.isArray(o.branches)) { const b = cleanBranches(o.branches, p.branches || []); if (b.length) p.branches = b; else delete p.branches; }
       audit('partner_edit', p.name, `تعديل بيانات ${p.name}${added.length ? ' · أصناف جديدة: ' + added.map(i => item(i).name).join('، ') : ''}${removed.length ? ' · اتشال: ' + removed.map(i => item(i).name).join('، ') : ''}`);
       return p;
     }
     need(!S.partners.some(x => x.type === o.type && x.name === o.name.trim()), 'الاسم ده متسجل قبل كده');
+    const branches = o.type === 'customer' && Array.isArray(o.branches) ? cleanBranches(o.branches, []) : null;
     const p = { id: uid(o.type === 'customer' ? 'CU' : 'SU'), type: o.type, name: o.name.trim(), phone: o.phone || '', kind: o.kind || null, terms: o.terms || 'credit', taxId: o.taxId || '', supplies: o.supplies || '', items, createdAt: today() };
+    if (branches && branches.length) p.branches = branches;
     S.partners.push(p);
     audit('partner_add', p.name, `إضافة ${o.type === 'customer' ? 'عميل' : 'مورد'}: ${p.name}`);
     return p;
@@ -1472,9 +1491,19 @@ function partnerStatement(id) {
   let run = 0; const rows = [];
   for (const j of S.journal) for (const l of j.lines) if (l.acc === acc && l.partner === id) {
     const dr = l.dr, cr = l.cr; run += p.type === 'customer' ? dr - cr : cr - dr;
-    rows.push({ date: j.date, no: j.no, memo: j.memo, ref: j.ref, dr, cr, run });
+    const v = j.ref && j.ref.type === 'invoice' ? S.docs.invoices.find(x => x.id === j.ref.id) : null;
+    rows.push({ date: j.date, no: j.no, memo: j.memo, ref: j.ref, dr, cr, run, branch: v && v.branchName ? v.branchName : '' });
   }
   return rows;
+}
+// one bill for a customer with branches: every branch's deliveries in the period, a subtotal per branch, and the grand total
+function branchBill({ customerId, from, to }) {
+  const c = partner(customerId); need(c.type === 'customer', 'اختار عميل'); need(isDay(from) && isDay(to) && from <= to, 'الفترة غير صحيحة');
+  const invs = S.docs.invoices.filter(v => v.customerId === customerId && v.date >= from && v.date <= to).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.no < b.no ? -1 : 1);
+  const names = [...(c.branches || []).map(b => b.name)]; for (const v of invs) if (!names.includes(v.branchName || '')) names.push(v.branchName || '');
+  const branches = names.map(name => { const list = invs.filter(v => (v.branchName || '') === name); return { name: name || 'من غير فرع', invoices: list.map(v => ({ no: v.no, date: v.date, total: v.total, paid: invoicePaid(v), kg: v.lines.reduce((s, l) => s + l.qty, 0) })), total: list.reduce((s, v) => s + v.total, 0), kg: list.reduce((s, v) => s + v.lines.reduce((a, l) => a + l.qty, 0), 0) }; }).filter(b => b.invoices.length);
+  const total = invs.reduce((s, v) => s + v.total, 0), paid = invs.reduce((s, v) => s + invoicePaid(v), 0);
+  return { customer: { id: c.id, name: c.name, phone: c.phone, taxId: c.taxId }, from, to, branches, total, paid, due: total - paid, balance: partnerBalance(c.id), count: invs.length };
 }
 /* integrity: books balanced, sub-ledgers match GL, inventory matches lots */
 function integrity() {
@@ -1844,7 +1873,7 @@ root.ERP = {
   init, reset, save, exportJSON, get S() { return S; },
   ACCOUNTS, LEAF, MEAT_SECTIONS, payLabel, updateAccess, finishMeat, returnRework, batchKg, batchCostNow, running, isOpenWeight, openButchery, butcheryInput, butcheryPack, butcheryOutput, butcheryDropOutput, newCutItem, closeButchery, butIn, butOut, butCost, BASE_ACCOUNTS, DEPOSIT_KINDS, depositSources, moneyKind, methodAcc, methodName, accLabel, staffName, personBalance, deposit, payLiability, advance, advanceBack, custody, settleCustody, saveAccount, deleteAccount, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
-  item, partner, userName, whName, me, available, cashBalance, invoicePaid, partnerBalance, partnerTotals, partnerStatement, batchById, issuedOf, priceFor, monthlyDepreciation,
+  item, partner, userName, whName, me, available, cashBalance, invoicePaid, partnerBalance, partnerTotals, partnerStatement, branchBill, batchById, issuedOf, priceFor, monthlyDepreciation,
   opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderPayLink, orderCardPaid, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
   saveItem, savePartner, resetBooks, updateSelf, saveWarehouse, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
   ledger, bal, trialBalance, incomeStatement, balanceSheet, manufacturingAccount, integrity, stockAlerts, fmtQty, money, accType, debitNature, leafUnder,
