@@ -218,37 +218,53 @@ PAGES.newinvoice = () => {
   const card = p => {
     const sizes = E.packsOf(p).filter(z => fgAvail(p.id, z) > 0);
     const price = E.priceFor(p, c);
-    return `<div class="pc ${sizes.length ? '' : 'out'}"><div class="pc-h"><b>${esc(p.name)}</b><span>${fm0(price)} ج للكيلو</span></div>
+    return `<div class="pc ${sizes.length ? '' : 'out'}"><div class="pc-h"><b>${esc(p.name)}</b><span>${fm0(price)} ج للكيلو</span></div>${U.costSale(p, price, { short: true })}
       ${sizes.length ? `<div class="pc-z">${sizes.map(z => { const n = inCart(p.id, z), left = fgAvail(p.id, z) - n; return `<button class="pz ${n ? 'on' : ''}" data-act="ni-plus" data-arg="${p.id}|${z}" ${left > 0 ? '' : 'disabled'} aria-label="ضيف ${esc(p.name)} ${packName(z)}"><b>${packName(z)}</b><small>${n ? `${n} في السلة` : `متاح ${left}`}</small></button>`; }).join('')}</div>`
         : `<div class="pc-out">مفيش رصيد في الفريزرات. بيتملا لما تتقفل تشغيلة للمنتج ده.</div>`}</div>`;
   };
-  const sorted = shown.slice().sort((a, b) => (E.available(b.id, E.whs('fg')) > 0) - (E.available(a.id, E.whs('fg')) > 0));
+  const sorted = NI.grp === '__stock' ? [] : shown.slice().sort((a, b) => (E.available(b.id, E.whs('fg')) > 0) - (E.available(a.id, E.whs('fg')) > 0));
+  // any stock item sells as it is too (raw cuts, صرة، عضم، توابل… by weight; packaging by piece): its own tab, or when searching
+  const stockAv = it => E.available(it.id, E.sellStores(it));
+  const rawShown = (NI.grp === '__stock' || q) ? s.items.filter(i => E.rawSellable(i) && i.active !== false && stockAv(i) > 0 && (!q || i.name.includes(q) || (i.code || '').toLowerCase().includes(q.toLowerCase()))) : [];
+  const unitTxt = it => (it.unit === 'kg' ? 'للكيلو' : 'للقطعة');
+  const rawCard = it => { const n = NI.lines.find(l => l.productId === it.id); return `<div class="pc"><div class="pc-h"><b>${esc(it.name)}</b><span>${E.priceFor(it, c) ? fm0(E.priceFor(it, c)) + ' ج ' + unitTxt(it) : 'السعر في السلة'}</span></div>${U.costSale(it, E.priceFor(it, c), { short: true })}
+    <div class="pc-z"><button class="pz ${n ? 'on' : ''}" data-act="ni-raw" data-arg="${it.id}"><b>${it.unit === 'kg' ? 'بالوزن' : 'بالعدد'}</b><small>${n ? 'في السلة' : `متاح ${qtyf(stockAv(it), it.unit)}`}</small></button></div></div>`; };
   // cart
   let gross = 0, cst = 0, err = '';
   NI.lines = NI.lines.filter(l => l.count > 0);
   const rows = NI.lines.map((l, k) => {
-    const p = E.item(l.productId), list = E.priceFor(p, c), price = l.price > 0 ? l.price : list, avail = fgAvail(p.id, l.packSize);
+    const p = E.item(l.productId), list = E.priceFor(p, c), price = l.price > 0 ? l.price : list;
+    if (p.cat !== 'product') { // stock item by weight / piece
+      const av = stockAv(p), amt = E.mulDiv(l.count, price, p.unit === 'kg' ? 1000 : 1); gross += amt;
+      if (l.count > av) err = `${p.name}: المتاح ${qtyf(av, p.unit)} بس`;
+      if (!price) err = `اكتب سعر ${p.name}`;
+      if (canCost()) cst += E.mulDiv(l.count, E.avgCostPerUnit(p.id), p.unit === 'kg' ? 1000 : 1);
+      return `<div class="ci"><div class="ci-t"><b>${esc(p.name)}</b><small>${p.unit === 'kg' ? 'بالوزن' : 'بالعدد'} · من المخزن</small>${U.costSale(p, price, { short: true })}<label class="ci-p"><span>${p.unit === 'kg' ? 'سعر الكيلو' : 'سعر القطعة'}</span><input class="f ni-p" data-k="${k}" type="number" inputmode="decimal" min="0" step="0.5" value="${price / 100}" aria-label="السعر">${price !== list && list ? `<small>الأساسي ${fm0(list)}</small>` : ''}</label></div>
+      <div class="ci-q"><input class="f ni-w" data-k="${k}" data-u="${p.unit}" type="number" inputmode="decimal" min="0" step="${p.unit === 'kg' ? '0.1' : '1'}" value="${p.unit === 'kg' ? l.count / 1000 : l.count}" aria-label="${p.unit === 'kg' ? 'الوزن بالكيلو' : 'العدد'}" style="width:90px"><small>${p.unit === 'kg' ? 'كجم' : 'قطعة'}</small></div>
+      <b class="ci-a">${fm(amt)}</b><button class="ci-x" data-act="ni-del" data-arg="${k}" aria-label="شيل من السلة">${ic('x')}</button></div>`;
+    }
+    const avail = fgAvail(p.id, l.packSize);
     const amt = E.mulDiv(l.count * l.packSize, price, 1000); gross += amt;
     if (l.count > avail) err = `${p.name} ${packName(l.packSize)}: المتاح ${avail} عبوة بس`;
     if (canCost()) { let need = l.count * l.packSize; for (const lot of s.lots.filter(x => x.itemId === p.id && E.whUse(x.wh) === 'fg' && x.packSize === l.packSize && x.qty > 0).sort((a, b) => (a.expDate || '') < (b.expDate || '') ? -1 : (a.expDate || '') > (b.expDate || '') ? 1 : a.inDate < b.inDate ? -1 : 1)) { const t = Math.min(need, lot.qty); cst += t === lot.qty ? lot.value : E.mulDiv(lot.value, t, lot.qty); need -= t; if (!need) break; } }
-    return `<div class="ci"><div class="ci-t"><b>${esc(p.name)}</b><small>${packName(l.packSize)} · ${kgf(l.count * l.packSize)} كجم</small><label class="ci-p"><span>سعر الكيلو</span><input class="f ni-p" data-k="${k}" type="number" inputmode="decimal" min="0" step="0.5" value="${price / 100}" aria-label="سعر الكيلو">${price !== list ? `<small>الأساسي ${fm0(list)}</small>` : ''}</label></div>
+    return `<div class="ci"><div class="ci-t"><b>${esc(p.name)}</b><small>${packName(l.packSize)} · ${kgf(l.count * l.packSize)} كجم${c.prices && c.prices[p.id] && price === c.prices[p.id] ? ' · <b class="cs-own">سعر العميل</b>' : ''}</small>${U.costSale(p, price, { short: true })}<label class="ci-p"><span>سعر الكيلو</span><input class="f ni-p" data-k="${k}" type="number" inputmode="decimal" min="0" step="0.5" value="${price / 100}" aria-label="سعر الكيلو">${price !== list ? `<small>الأساسي ${fm0(list)}</small>` : ''}</label></div>
       <div class="ci-q"><button class="qb" data-act="ni-minus" data-arg="${k}" aria-label="قلّل">−</button><input class="f ni-c" data-k="${k}" type="number" inputmode="numeric" min="1" step="1" value="${l.count}" aria-label="العدد"><button class="qb" data-act="ni-plus" data-arg="${p.id}|${l.packSize}" ${l.count < avail ? '' : 'disabled'} aria-label="زوّد">+</button></div>
       <b class="ci-a">${fm(amt)}</b><button class="ci-x" data-act="ni-del" data-arg="${k}" aria-label="شيل من السلة">${ic('x')}</button></div>`;
   }).join('');
   const disc = toP(NI.discount || '0') || 0;
   const net = gross - disc, vat = Math.round(Math.max(net, 0) * s.settings.vatRate / 100), total = net + vat;
-  const count = NI.lines.reduce((a, l) => a + l.count, 0);
+  const count = NI.lines.reduce((a, l) => a + (E.item(l.productId).cat === 'product' ? l.count : 1), 0);
   page('بيع جديد', `<div class="pos">
     <section class="pos-cat card"><div class="bd">
       <div class="pos-tools"><input class="f" id="ni-q" type="search" placeholder="ابحث باسم المنتج" value="${esc(NI.q)}" aria-label="ابحث باسم المنتج">
-        <div class="seg pos-g"><button class="${NI.grp ? '' : 'on'}" data-act="ni-grp" data-arg="">الكل</button>${groups.map(g => `<button class="${NI.grp === g ? 'on' : ''}" data-act="ni-grp" data-arg="${esc(g)}">${esc(g)}</button>`).join('')}</div></div>
-      <div class="pcs">${sorted.map(card).join('') || '<div class="empty">مفيش منتج بالاسم ده</div>'}</div>
+        <div class="seg pos-g"><button class="${NI.grp ? '' : 'on'}" data-act="ni-grp" data-arg="">الكل</button>${groups.map(g => `<button class="${NI.grp === g ? 'on' : ''}" data-act="ni-grp" data-arg="${esc(g)}">${esc(g)}</button>`).join('')}<button class="${NI.grp === '__stock' ? 'on' : ''}" data-act="ni-grp" data-arg="__stock">من المخزن (أي صنف)</button></div></div>
+      <div class="pcs">${sorted.map(card).join('')}${rawShown.map(rawCard).join('')}${sorted.length || rawShown.length ? '' : `<div class="empty">${NI.grp === '__stock' ? 'مفيش أصناف في المخزن' : 'مفيش منتج بالاسم ده'}</div>`}</div>
     </div></section>
     <aside class="pos-cart card" id="cart"><div class="bd">
       <div class="hd" style="padding:0 0 10px"><h3>السلة</h3><span class="sub">${count ? count + ' عبوة' : 'فاضية'}</span>${count ? '<div class="tools"><button class="btn sm" data-act="ni-reset">فضّي السلة</button></div>' : ''}</div>
       <div class="fgrid one"><label class="fld"><span>العميل</span><select class="f" id="ni-c">${partnerOptions('customer', NI.cust)}</select></label>
         ${brs.length ? `<label class="fld"><span>الفرع</span><select class="f" id="ni-b" required><option value="">اختار الفرع…</option>${brs.map(b => `<option value="${b.id}" ${b.id === NI.branch ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>` : ''}
-        <div class="pos-meta"><span class="pill ${c.kind === 'wholesale' ? 'info' : 'warn'}">${c.kind === 'wholesale' ? 'أسعار الجملة' : 'أسعار القطاعي'}</span>${E.partnerBalance && c.terms === 'credit' ? `<span class="pill mut">عليه ${fm0(E.partnerBalance(c.id))} ج</span>` : ''}</div>
+        <div class="pos-meta"><span class="pill ${c.kind === 'wholesale' ? 'info' : 'warn'}">${c.kind === 'wholesale' ? 'أسعار الجملة' : 'أسعار القطاعي'}</span>${c.prices && Object.keys(c.prices).length ? `<span class="pill ok">قايمة أسعار خاصة (${Object.keys(c.prices).length})</span>` : ''}${E.partnerBalance && c.terms === 'credit' ? `<span class="pill mut">عليه ${fm0(E.partnerBalance(c.id))} ج</span>` : ''}</div>
         <div class="fgrid two"><label class="fld"><span>الدفع</span><select class="f" id="ni-m">${methodOptions(methods, NI.method)}</select></label>
         <label class="fld"><span>التاريخ</span><input class="f" id="ni-d" type="date" value="${E.today()}" max="${E.today()}"></label></div></div>
       <div class="cis">${rows || '<div class="empty cart-empty">دوس على حجم العبوة في أي منتج عشان يتضاف هنا.</div>'}</div>
@@ -268,10 +284,12 @@ PAGES.newinvoice = () => {
   const x = document.getElementById('ni-x'); if (x) x.onchange = e => { NI.discount = e.target.value; U.render(); };
   const qi = document.getElementById('ni-q'); let tq; qi.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { NI.q = e.target.value; U.render(); const n = document.getElementById('ni-q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
   mb.querySelectorAll('.ni-p').forEach(el => { el.onchange = () => { const v = toP(el.value); NI.lines[el.dataset.k].price = v > 0 ? v : null; U.render(); }; });
+  mb.querySelectorAll('.ni-w').forEach(el => { el.onchange = () => { const v = el.dataset.u === 'kg' ? toG(el.value) : toI(el.value); NI.lines[el.dataset.k].count = Math.max(0, v || 0); U.render(); }; });
   mb.querySelectorAll('.ni-c').forEach(el => { el.onchange = () => { NI.lines[el.dataset.k].count = Math.max(0, toI(el.value) || 0); U.render(); }; });
 };
 ACTS['sale-to'] = id => { NI.cust = id; NI.method = null; U.go('newinvoice'); };
 ACTS['ni-plus'] = arg => { const [id, z] = arg.split('|'); const l = NI.lines.find(x => x.productId === id && x.packSize === +z); if (l) l.count++; else NI.lines.push({ productId: id, packSize: +z, count: 1 }); U.render(); };
+ACTS['ni-raw'] = id => { const it = E.item(id); if (!NI.lines.some(l => l.productId === id)) NI.lines.push({ productId: id, packSize: 1, count: it.unit === 'kg' ? 1000 : 1 }); U.render(); setTimeout(() => { const el = [...document.querySelectorAll('.ni-w')].pop(); if (el) { el.focus(); el.select(); } }, 50); };
 ACTS['ni-minus'] = k => { const l = NI.lines[+k]; if (l) l.count--; U.render(); };
 ACTS['ni-del'] = k => { NI.lines.splice(+k, 1); U.render(); };
 ACTS['ni-grp'] = g => { NI.grp = g || ''; U.render(); };
@@ -285,6 +303,11 @@ ACTS['ni-save'] = async () => {
 };
 let INV_PRINT = null; // open the print dialog once, right after a sale is confirmed
 
+// an invoice line is packs (products) or a stock item sold as it is (count = grams for kg items, pieces otherwise)
+const lnUnit = l => (l.raw ? (E.item(l.productId).unit === 'pc' ? 'pc' : 'kg') : 'pack');
+const lnPack = l => (l.raw ? (lnUnit(l) === 'kg' ? 'بالوزن' : 'بالعدد') : packName(l.packSize));
+const lnCount = (l, n) => (l.raw ? (lnUnit(l) === 'kg' ? `${kgf(n)} كجم` : `${n} قطعة`) : `${n}`);
+const lnQty = l => (lnUnit(l) === 'pc' ? `${l.qty} قطعة` : `${kgf(l.qty)} كجم`);
 PAGES.invoice = id => {
   const s = S(), v = s.docs.invoices.find(x => x.id === id); if (!v) { U.go('invoices'); return; }
   if (INV_PRINT === id) { INV_PRINT = null; setTimeout(() => window.print(), 450); }
@@ -298,7 +321,7 @@ PAGES.invoice = id => {
       <div class="inv-m"><div><small>العميل</small><b>${esc(c.name)}</b>${v.branchName ? `<br>فرع: <b>${esc(v.branchName)}</b>` : ''}<br>${c.kind === 'wholesale' ? 'جملة' : 'قطاعي'} · ${E.payLabel(v.method)}${c.taxId ? `<br>رقم ضريبي: ${esc(c.taxId)}` : ''}${c.phone ? `<br><span dir="ltr">${esc(c.phone)}</span>` : ''}</div>
         <div><small>بيانات الطلب</small>استلام من المصنع<br>بواسطة: ${esc(E.userName(v.by))}<br>تشغيلات: ${[...new Set(v.lines.flatMap(l => l.parts.map(p => (s.lots.find(x => x.id === p.lotId) || {}).src).filter(Boolean).map(x => x.no)))].map(esc).join('، ')}</div></div>
       <table><thead><tr><th>#</th><th>الصنف</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">الإجمالي</th></tr></thead>
-        <tbody>${v.lines.map((l, k) => `<tr><td>${k + 1}</td><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n">${fm(l.amount)}${l.returned ? `<br><small style="color:#b45309">رجع ${l.returned}</small>` : ''}</td></tr>`).join('')}</tbody></table>
+        <tbody>${v.lines.map((l, k) => `<tr><td>${k + 1}</td><td>${esc(E.item(l.productId).name)}</td><td>${lnPack(l)}</td><td class="n">${l.raw ? '—' : l.count}</td><td class="n">${lnQty(l)}</td><td class="n">${fm(l.pricePerKg)}${lnUnit(l) === 'pc' ? ' <small>للقطعة</small>' : ''}</td><td class="n">${fm(l.amount)}${l.returned ? `<br><small style="color:#b45309">رجع ${lnCount(l, l.returned)}</small>` : ''}</td></tr>`).join('')}</tbody></table>
       <div class="inv-f"><div style="display:flex;gap:12px;align-items:flex-end"><div class="qr">QR<br>الفاتورة<br>الإلكترونية</div><div style="font-size:11.5px;color:#666">الرقم الإلكتروني (UUID)<br><span class="mono">${esc(v.eta.uuid.slice(0, 8))}…${esc(v.eta.uuid.slice(-6))}</span><br>حالة المنظومة: مقبولة (محاكاة)</div></div>
         <div class="inv-t"><div><span>الإجمالي</span><span>${fm(v.gross)}</span></div><div><span>خصم</span><span>${fm(v.discount)}</span></div>${v.vat ? `<div><span>الصافي</span><span>${fm(v.net)}</span></div><div><span>ضريبة القيمة المضافة</span><span>${fm(v.vat)}</span></div>` : ''}<div class="g"><span>الإجمالي المستحق</span><span>${fm(v.total)} ج</span></div></div></div>
       <div style="display:flex;gap:40px;font-size:12.5px;color:#666;padding-top:10px"><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المستلم</span><span style="border-top:1px solid #999;padding-top:4px;min-width:140px">توقيع المسؤول</span></div>
@@ -311,19 +334,19 @@ const doneMsg = (r, ok) => (r && r.requested ? `اتبعت للمالك (${r.no}
 ACTS['inv-return'] = id => {
   const v = S().docs.invoices.find(x => x.id === id);
   modal('مرتجع على فاتورة ' + esc(v.no), `${ownerNote()}
-    <div class="tw"><table class="t"><thead><tr><th>الصنف</th><th>العبوة</th><th class="n">اتباع</th><th class="n">راجع</th></tr></thead><tbody>${v.lines.map((l, k) => { const left = l.count - (l.returned || 0); return `<tr><td>${esc(E.item(l.productId).name)}</td><td>${packName(l.packSize)}</td><td class="n">${l.count}${l.returned ? ` <small>(رجع ${l.returned})</small>` : ''}</td><td class="n"><input class="f rt-c" data-k="${k}" type="number" min="0" max="${left}" step="1" value="0" style="width:90px" ${left ? '' : 'disabled'}></td></tr>`; }).join('')}</tbody></table></div>
+    <div class="tw"><table class="t"><thead><tr><th>الصنف</th><th>العبوة</th><th class="n">اتباع</th><th class="n">راجع</th></tr></thead><tbody>${v.lines.map((l, k) => { const left = l.count - (l.returned || 0), kgLine = lnUnit(l) === 'kg' && l.raw; return `<tr><td>${esc(E.item(l.productId).name)}</td><td>${lnPack(l)}</td><td class="n">${lnCount(l, l.count)}${l.returned ? ` <small>(رجع ${lnCount(l, l.returned)})</small>` : ''}</td><td class="n"><input class="f rt-c" data-k="${k}" data-kg="${kgLine ? 1 : 0}" type="number" min="0" max="${kgLine ? left / 1000 : left}" step="${kgLine ? '0.1' : '1'}" value="0" style="width:90px" ${left ? '' : 'disabled'}>${kgLine ? ' <small>كجم</small>' : ''}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="fgrid"><label class="fld"><span>البضاعة اللي راجعة</span><select class="f" id="rt-s"><option value="1">ترجع الفريزر وتتباع تاني</option><option value="0">هالك (مش هتتباع)</option></select></label>
       <label class="fld"><span>الفلوس</span><select class="f" id="rt-m"><option value="">تتخصم من حساب العميل</option>${U.moneyAccs('cash').map(c => `<option value="${c}">ترجع للعميل من ${esc(accName(c))}</option>`).join('')}</select></label>
       <label class="fld"><span>التاريخ</span><input class="f" id="rt-d" type="date" value="${E.today()}" max="${E.today()}"></label></div>${reasonField('rt-r')}`,
   { wide: true, saveText: U.isOwner() ? 'تأكيد المرتجع' : 'ابعت للمالك', save: async () => {
-    const lines = [...document.querySelectorAll('.rt-c')].map(el => ({ idx: +el.dataset.k, count: toI(el.value || '0') || 0 })).filter(l => l.count > 0);
+    const lines = [...document.querySelectorAll('.rt-c')].map(el => ({ idx: +el.dataset.k, count: (el.dataset.kg === '1' ? toG(el.value || '0') : toI(el.value || '0')) || 0 })).filter(l => l.count > 0);
     const r = await E.invoiceReturn({ invoiceId: id, lines, restock: val('rt-s') === '1', refund: val('rt-m') || null, date: val('rt-d'), reason: val('rt-r') });
     toast(doneMsg(r, `اتسجل المرتجع ${r.no || ''}`), 'ok'); } });
 };
 ACTS['inv-price'] = id => {
   const v = S().docs.invoices.find(x => x.id === id);
   modal('تعديل سعر في فاتورة ' + esc(v.no), `${ownerNote()}
-    <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="ip-l">${v.lines.map((l, k) => `<option value="${k}" ${l.returned ? 'disabled' : ''} ${k === v.lines.findIndex(x => !x.returned) ? 'selected' : ''}>${esc(E.item(l.productId).name)} ${packName(l.packSize)} × ${l.count} · ${fm0(l.pricePerKg)} ج للكيلو</option>`).join('')}</select></label>
+    <div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="ip-l">${v.lines.map((l, k) => `<option value="${k}" ${l.returned ? 'disabled' : ''} ${k === v.lines.findIndex(x => !x.returned) ? 'selected' : ''}>${esc(E.item(l.productId).name)} ${lnPack(l)} · ${lnQty(l)} · ${fm0(l.pricePerKg)} ج ${lnUnit(l) === 'pc' ? 'للقطعة' : 'للكيلو'}</option>`).join('')}</select></label>
       <label class="fld"><span>سعر الكيلو الجديد (ج)</span><input class="f" id="ip-p" type="number" min="0" step="0.5"></label></div>
     <div class="crumb">الفرق بيتسجل على حساب العميل (زيادة أو نقص).</div>${reasonField('ip-r')}`,
   { saveText: U.isOwner() ? 'تأكيد التعديل' : 'ابعت للمالك', save: async () => { const r = await E.invoicePrice({ invoiceId: id, idx: toI(val('ip-l')), pricePerKg: toP(val('ip-p')), reason: val('ip-r') }); toast(doneMsg(r, 'اتعدل السعر'), 'ok'); } });
@@ -376,7 +399,21 @@ PAGES.customer = id => {
     <div class="grid g-main"><div class="card"><div class="hd"><h3>الفواتير</h3></div><div class="bd">${table('cinv', [{ t: 'الرقم', f: v => `<span class="mono">${esc(v.no)}</span>` }, { t: 'التاريخ', f: v => df(v.date) }, ...((p.branches || []).length ? [{ t: 'الفرع', f: v => esc(v.branchName || '') }] : []), { t: 'الأصناف', f: v => v.lines.map(l => `${esc(E.item(l.productId).name)} ${l.count}×${packName(l.packSize)}`).join('، ') }, { t: 'الدفع', f: v => E.payLabel(v.method) }, { t: 'الإجمالي', n: 1, f: v => `<b>${fm(v.total)}</b>` }], invs.slice().reverse(), { onRow: v => 'invoice/' + v.id })}</div></div>
       <div class="card"><div class="hd"><h3>بيشتري إيه</h3><span class="sub">كجم</span></div><div class="bd">${hbars(Object.entries(prod).sort((a, b) => b[1] - a[1]).map(([k, q]) => ({ label: E.item(k).name, v: q })), v => kgf(v))}
         <div class="kv" style="margin-top:14px"><div><span>التليفون</span><b class="mono">${esc(p.phone || '—')}</b></div><div><span>رقم ضريبي</span><b>${esc(p.taxId || '—')}</b></div></div></div></div></div>
+    ${(() => { const pr = p.prices || {}, rows = Object.entries(pr).map(([iid, v]) => ({ it: E.item(iid), v })), canP = ['owner', 'accountant'].includes(U.role());
+      return `<div class="card"><div class="hd"><h3>قايمة أسعار العميل</h3><span class="sub">${rows.length ? 'الفاتورة بتاخد السعر ده لوحدها، وتقدر تغيّره وقت البيع' : 'بيتحاسب بأسعار ' + (p.kind === 'wholesale' ? 'الجملة' : 'القطاعي') + ' العادية'}</span>${canP ? `<div class="tools"><button class="btn sm p" data-act="cp-edit" data-arg="${id}">${ic('plus')} تعديل الأسعار</button></div>` : ''}</div><div class="bd">${rows.length ? table('cpr-' + id, [{ t: 'الصنف', f: r => esc(r.it.name) }, { t: 'سعره العادي', n: 1, f: r => fm(p.kind === 'wholesale' ? (r.it.priceWholesale || r.it.priceRetail) : r.it.priceRetail) }, { t: 'سعر العميل', n: 1, f: r => `<b>${fm(r.v)}</b> ${r.it.unit === 'pc' ? '<small>للقطعة</small>' : '<small>للكيلو</small>'}` }, ...(U.isOwner() ? [{ t: 'التكلفة والهامش', f: r => U.costSale(r.it, r.v, { short: true }) }] : [])], rows) : '<div class="empty">مفيش أسعار خاصة</div>'}</div></div>`; })()}
     <div class="card"><div class="hd"><h3>كشف الحساب</h3></div><div class="bd">${table('cst', [{ t: 'التاريخ', f: r => df(r.date) }, { t: 'القيد', f: r => `<span class="mono">${esc(r.no)}</span>` }, ...((p.branches || []).length ? [{ t: 'الفرع', f: r => esc(r.branch || '') }] : []), { t: 'البيان', f: r => tx(r.memo) }, { t: 'مدين', n: 1, f: r => r.dr ? fm(r.dr) : '' }, { t: 'دائن', n: 1, f: r => r.cr ? fm(r.cr) : '' }, { t: 'الرصيد', n: 1, f: r => `<b>${fm(r.run)}</b>` }], st.slice().reverse())}</div></div>`, { crumb: '<a href="#customers">العملاء</a>' });
+};
+ACTS['cp-edit'] = id => {
+  const p = E.partner(id), pr = { ...(p.prices || {}) }, all = S().items.filter(i => (i.cat === 'product' || E.rawSellable(i)) && i.active !== false);
+  const draw = () => { const el = document.getElementById('cp-rows'); el.innerHTML = Object.keys(pr).length ? Object.entries(pr).map(([iid, v]) => `<div class="fgrid cp-r" data-id="${iid}"><label class="fld"><span>${esc(E.item(iid).name)}</span><input class="f cp-v" type="number" min="0" step="0.5" value="${v / 100}"></label><div class="fld"><span>&nbsp;</span><button class="btn sm dan" type="button" data-rm="${iid}">شيل</button></div></div>`).join('') : '<div class="empty">ضيف صنف من فوق</div>';
+    el.querySelectorAll('[data-rm]').forEach(b => { b.onclick = () => { read(); delete pr[b.dataset.rm]; draw(); }; }); };
+  const read = () => document.querySelectorAll('.cp-r').forEach(r => { const v = toP(r.querySelector('.cp-v').value); pr[r.dataset.id] = v > 0 ? v : 0; });
+  modal('قايمة أسعار ' + esc(p.name), `<div class="note info">الأسعار دي بتتحط لوحدها في أي فاتورة للعميل ده${(p.branches || []).length ? ' ولكل فروعه' : ''}، ومع كده تقدر تغيّر السعر وقت البيع.</div>
+    <div class="fgrid"><label class="fld"><span>صنف</span><input class="f" id="cp-q" list="cp-l" placeholder="اكتب اسم الصنف"><datalist id="cp-l">${all.map(i => `<option value="${esc(i.name)}">`).join('')}</datalist></label><label class="fld"><span>السعر (ج ${''}للكيلو أو القطعة)</span><input class="f" id="cp-n" type="number" min="0" step="0.5"></label><div class="fld"><span>&nbsp;</span><button class="btn" type="button" id="cp-add">${ic('plus')} ضيف</button></div></div>
+    <div id="cp-rows"></div>`,
+  { wide: true, saveText: 'حفظ الأسعار', save: async () => { read(); await E.setCustomerPrices({ customerId: id, prices: Object.fromEntries(Object.entries(pr).filter(([, v]) => v > 0)) }); toast('اتحفظت قايمة الأسعار', 'ok'); } });
+  draw();
+  document.getElementById('cp-add').onclick = () => { read(); const it = all.find(i => i.name === val('cp-q').trim()); const v = toP(val('cp-n')); if (!it) { toast('اختار صنف من القايمة', 'bad'); return; } if (!(v > 0)) { toast('اكتب السعر', 'bad'); return; } pr[it.id] = v; document.getElementById('cp-q').value = ''; document.getElementById('cp-n').value = ''; draw(); };
 };
 function partnerForm(p, type) {
   p = p || { type, kind: 'wholesale', terms: 'credit', items: [] };
@@ -443,7 +480,7 @@ PAGES.items = () => {
       { t: 'الرصيد', n: 1, f: i => qtyf(sumBy(s.lots.filter(l => l.itemId === i.id), l => l.qty), i.unit) }, { t: 'الحد الأدنى', n: 1, f: i => i.minQty ? qtyf(i.minQty, i.unit) : '—' }];
     if (tb.cur === 'product') cols.splice(2, 1, { t: 'القسم', f: i => esc(i.group || '—') }, { t: 'العبوات', f: i => E.packsOf(i).map(packName).join('، ') });
     if (tb.cur === 'product' || tb.cur === 'meat') cols.push({ t: 'قطاعي / كجم', n: 1, f: i => i.priceRetail ? `<b>${fm(i.priceRetail)}</b>` : '—' }, { t: 'جملة / كجم', n: 1, f: i => i.priceWholesale ? `<b>${fm(i.priceWholesale)}</b>` : '—' });
-    if (own) cols.push({ t: '', f: i => `<button class="btn sm" data-act="item-edit" data-arg="${i.id}">تعديل</button>` });
+    if (own) cols.push({ t: 'التكلفة · البيع · الهامش', f: i => U.costSale(i, null, { short: true }) }, { t: '', f: i => `<button class="btn sm" data-act="item-edit" data-arg="${i.id}">تعديل</button>` });
     body = table('it-' + tb.cur, cols, rows);
   }
   page('الأصناف والأسعار', `<div class="bar">${tb.html}${searchBox('itq', 'ابحث')}<span class="grow"></span>${own ? `<button class="btn p" data-act="item-edit">${ic('plus')} صنف جديد</button>` : ''}</div>
@@ -457,12 +494,13 @@ ACTS['item-edit'] = id => {
     <label class="fld"><span>النوع</span><select class="f" id="ie-t" ${used ? 'disabled' : ''}>${Object.entries(E.CAT_NAME).map(([k, n]) => `<option value="${k}" ${it.cat === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="fld"><span>القسم (للمنتجات)</span><select class="f" id="ie-g">${['مصنعات', 'قطعيات', 'قطعيات مميزة', 'مقبلات', 'لحوم باردة'].map(g => `<option ${it.group === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
     ${it.cat === 'product' || !id ? `<div class="fld"><span>العبوات المتاحة (للمنتجات)</span><div class="pk-opts">${[...new Set([...E.PACK_SIZES, ...(it.packs || [])])].sort((a, b) => a - b).map(z => `<label><input type="checkbox" class="ie-pk" value="${z}" ${(it.packs || E.PACK_SIZES).includes(z) ? 'checked' : ''}> ${packName(z)}</label>`).join('')}</div></div>` : ''}
+    <label class="fld"><span>تكلفة ثابتة للكيلو في الجزارة (ج) — اختياري</span><input class="f" id="ie-fc" type="number" min="0" step="0.5" value="${it.fixedCost != null ? it.fixedCost / 100 : ''}" placeholder="مثلًا مفاريم 350، غضاريف 35، بوش 150، عضم 0"></label>
     <label class="fld"><span>القسم في شاشة العامل (للحوم)</span><input class="f" id="ie-s" list="ie-sl" value="${esc(it.sub || '')}" placeholder="بلدي فريش، برازيلي، دهون…"><datalist id="ie-sl">${[...new Set([...E.MEAT_SECTIONS, ...S().items.map(i => i.sub).filter(Boolean)])].map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
     <label class="fld"><span>الوحدة</span><select class="f" id="ie-u" ${used ? 'disabled' : ''}><option value="kg" ${it.unit === 'kg' ? 'selected' : ''}>كجم</option><option value="pc" ${it.unit === 'pc' ? 'selected' : ''}>قطعة</option></select></label>
     <label class="fld"><span>سعر القطاعي للكيلو (ج)</span><input class="f" id="ie-r" type="number" min="0" step="0.01" value="${it.priceRetail / 100}"></label><label class="fld"><span>سعر الجملة للكيلو (ج)</span><input class="f" id="ie-w" type="number" min="0" step="0.01" value="${it.priceWholesale / 100}"></label>
     <label class="fld"><span>الحد الأدنى (${it.unit === 'kg' ? 'كجم' : 'قطعة'})</span><input class="f" id="ie-m" type="number" min="0" step="1" value="${it.unit === 'kg' ? it.minQty / 1000 : it.minQty}"></label>${!id ? `<label class="fld"><span>لو كيس: لعبوة وزنها (جرام)</span><input class="f" id="ie-pf" type="number" min="50" max="20000" step="10" placeholder="مثلًا 200"></label>` : it.packFor ? `<label class="fld"><span>كيس لعبوة</span><input class="f" value="${it.packFor} جرام" disabled></label>` : ''}</div>
     ${used ? '<div class="crumb">النوع والوحدة مقفولين لأن الصنف عليه حركات.</div>' : ''}<div class="crumb">سعر القطاعي للقطعيات بيستخدم كمان في توزيع تكلفة التقطيع.</div>`,
-  { save: async () => { const unit = val('ie-u'); await E.saveItem({ id, name: val('ie-n'), group: val('ie-g'), cat: val('ie-t'), unit, priceRetail: toP(val('ie-r')) || 0, priceWholesale: toP(val('ie-w')) || 0, minQty: unit === 'kg' ? toG(val('ie-m')) || 0 : toI(val('ie-m')) || 0, vat: 0, sub: val('ie-s'), ...(val('ie-t') === 'product' ? { packs: [...document.querySelectorAll('.ie-pk:checked')].map(x => +x.value) } : {}), ...(!id && toI(val('ie-pf')) ? { packFor: toI(val('ie-pf')) } : {}) }); toast('اتحفظ', 'ok'); } });
+  { save: async () => { const unit = val('ie-u'); await E.saveItem({ id, name: val('ie-n'), group: val('ie-g'), cat: val('ie-t'), unit, priceRetail: toP(val('ie-r')) || 0, priceWholesale: toP(val('ie-w')) || 0, minQty: unit === 'kg' ? toG(val('ie-m')) || 0 : toI(val('ie-m')) || 0, vat: 0, sub: val('ie-s'), fixedCost: val('ie-fc') === '' ? null : toP(val('ie-fc')), ...(val('ie-t') === 'product' ? { packs: [...document.querySelectorAll('.ie-pk:checked')].map(x => +x.value) } : {}), ...(!id && toI(val('ie-pf')) ? { packFor: toI(val('ie-pf')) } : {}) }); toast('اتحفظ', 'ok'); } });
 };
 
 /* ========== TREASURY ========== */

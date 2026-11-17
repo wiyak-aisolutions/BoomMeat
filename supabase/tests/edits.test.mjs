@@ -115,9 +115,92 @@ const bag = S().items.find(i => i.cat === 'pack' && i.packFor === 1000), bag0 = 
 E.butcheryPack({ id: run0.id, itemId: bag.id, qty: 10 }); E.butcheryDropPack({ id: run0.id, packId: R().packs[0].id });
 ok('drop a bags line: bags back', E.available(bag.id, E.whs('pack')) === bag0 && sound());
 const fgBefore = E.available(cut.id, E.whs('fg'), 1000);
+ok('close refused without bags', /الأكياس/.test(refused(() => E.closeButchery({ id: run0.id, date: T })) || ''));
+E.butcheryPack({ id: run0.id, itemId: bag.id, qty: 12 });
 E.closeButchery({ id: run0.id, date: T });
 ok('ready product lands in the freezer as packs', E.available(cut.id, E.whs('fg'), 1000) === fgBefore + 10000 && R().loss === 30000 - 19000);
 ok('books + manufacturing sound after butchery with products', sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + JSON.stringify((({ production, producedPosted, cogs, cogsPosted }) => ({ production, producedPosted, cogs, cogsPosted }))(E.manufacturingAccount({ from: E.addDays(T, -40), to: T }))));
+
+/* ---------- butchery: edit input weight, owner cancels, bags cost on its own ---------- */
+as('storekeeper');
+const calfPo2 = E.purchase({ date: T, supplierId: S().partners.find(p => p.type === 'supplier').id, ref: 'B2', lines: [{ itemId: S().items.find(i => i.cat === 'carcass').id, qty: 400000, unitCost: 30000, expDate: E.addDays(T, 9) }] });
+const lotC = calfPo2.lines[0].lotId, LC = () => S().lots.find(l => l.id === lotC);
+as('supervisor'); const rb = E.openButchery({ date: T, lotId: lotC, qty: 290000 });
+const RB = () => S().docs.butcheries.find(x => x.id === rb.id), inId = rb.inputs[0].id;
+const req2 = E.butcheryEditInput({ id: rb.id, inputId: inId, qty: 280000, reason: 'الميزان كان غلط' });
+ok('supervisor weight edit → owner request', req2.requested && RB().inputs[0].qty === 290000);
+as('owner'); E.decideChange(S().docs.changes.at(-1).id, true);
+ok('approved: run 280 kg, 10 kg back in stock', RB().inputs[0].qty === 280000 && LC().qty === 120000 && sound());
+E.butcheryEditInput({ id: rb.id, inputId: inId, qty: 300000 });
+ok('owner raises the weight directly', RB().inputs[0].qty === 300000 && LC().qty === 100000 && E.butCost(RB()) === RB().inputs[0].value && sound());
+E.butcheryPack({ id: rb.id, itemId: bag.id, qty: 20 });
+const bagCost = RB().packs.reduce((a, p) => a + p.value, 0);
+ok('bags cost on its own, added to the run', bagCost > 0 && E.butCost(RB()) === RB().inputs[0].value + bagCost);
+const bag500b = E.available(bag.id, E.whs('pack'));
+E.cancelButchery({ id: rb.id, reason: 'اتسجلت غلط' });
+ok('owner cancels an open run: calf and bags back', RB().status === 'cancelled' && LC().qty === 400000 && E.available(bag.id, E.whs('pack')) === bag500b + 20 && sound());
+ok('cancel needs a reason', !!refused(() => E.cancelButchery({ id: rb.id, reason: '' })));
+as('supervisor'); const rc = E.openButchery({ date: T, lotId: lotC, qty: 200000 }); E.butcheryPack({ id: rc.id, itemId: bag.id, qty: 10 });
+const cutR = S().items.find(i => i.cat === 'meat' && i.priceRetail > 0 && !i.rework);
+E.butcheryOutput({ id: rc.id, itemId: cutR.id, qty: 150000 }); E.butcheryOutput({ id: rc.id, itemId: cut.id, count: 5, packSize: 1000 });
+E.closeButchery({ id: rc.id, date: T });
+ok('supervisor cannot cancel', !!refused(() => E.cancelButchery({ id: rc.id, reason: 'غلط' })));
+as('owner'); E.cancelButchery({ id: rc.id, reason: 'اتقفلت بالغلط' });
+const RC = S().docs.butcheries.find(x => x.id === rc.id);
+ok('owner cancels a closed run with untouched output: all back, output gone', RC.status === 'cancelled' && LC().qty === 400000 && RC.outputs.every(o => S().lots.find(l => l.code === o.lotCode).qty === 0) && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
+as('supervisor'); const rd = E.openButchery({ date: T, lotId: lotC, qty: 100000 }); E.butcheryPack({ id: rd.id, itemId: bag.id, qty: 5 });
+E.butcheryOutput({ id: rd.id, itemId: cutR.id, qty: 80000 }); E.closeButchery({ id: rd.id, date: T });
+const outLot = S().lots.find(l => l.code === S().docs.butcheries.find(x => x.id === rd.id).outputs[0].lotCode);
+as('storekeeper'); E.transfer({ date: T, lotId: outLot.id, qty: 1000, toWh: E.whs('raw').find(w => w !== outLot.wh) || E.whs('receiving')[0] });
+as('owner'); ok('cannot cancel once its output was used', /مينفعش التشغيلة تتلغي/.test(refused(() => E.cancelButchery({ id: rd.id, reason: 'غلط' })) || ''));
+as('owner'); const msg = refused(() => E.reopenButchery({ id: rd.id, reason: 'وزن غلط' }));
+ok('reopen refused with a clear reason when a cut moved', /اتنقل منها/.test(msg || '') && /مينفعش التشغيلة تتفتح/.test(msg || ''), msg);
+// reopen → edit → close again
+as('supervisor'); const re = E.openButchery({ date: T, lotId: lotC, qty: 50000 }); E.butcheryPack({ id: re.id, itemId: bag.id, qty: 4 });
+const reOut = E.butcheryOutput({ id: re.id, itemId: cutR.id, qty: 40000 }); E.butcheryOutput({ id: re.id, itemId: cut.id, count: 3, packSize: 1000 }); E.closeButchery({ id: re.id, date: T });
+const RE = () => S().docs.butcheries.find(x => x.id === re.id), oldLot = RE().outputs[0].lotCode;
+as('supervisor'); ok('supervisor cannot reopen', !!refused(() => E.reopenButchery({ id: re.id, reason: 'فتح' })));
+as('owner'); E.reopenButchery({ id: re.id, reason: 'وزن القطعية غلط' });
+ok('reopened: status open, cut lots out of stock, books sound', RE().status === 'open' && S().lots.find(l => l.code === oldLot).qty === 0 && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
+as('supervisor'); E.butcheryEditOutput({ id: re.id, lineId: reOut.id, qty: 42000 }); E.closeButchery({ id: re.id, date: T });
+ok('edited and closed again: books sound', RE().status === 'closed' && RE().outputs[0].qty === 42000 && RE().reopens.length === 1 && sound());
+// a sold cut blocks reopen with the invoice number
+const fgCut = S().lots.find(l => l.code === RE().outputs[1].lotCode);
+as('sales'); const sv = E.invoice({ date: T, customerId: cust.id, lines: [{ productId: cut.id, packSize: 1000, count: Math.floor(E.available(cut.id, E.whs('fg'), 1000) / 1000) }], method: 'credit' }); // sells every 1 kg pack, so this run's lot too
+as('owner'); const m2 = refused(() => E.reopenButchery({ id: re.id, reason: 'تاني' })) || '', m3 = refused(() => E.cancelButchery({ id: re.id, reason: 'تاني' })) || '';
+ok('sold cut: reopen refused and names the invoice', m2.includes('اتباع منها') && m2.includes(sv.no) && RE().status === 'closed', m2);
+ok('cancel message names it too', m3.includes('مينفعش التشغيلة تتلغي'), m3);
+ok('books sound after all butchery edits', sound());
+
+/* ---------- production batch: owner reopens / cancels a closed batch ---------- */
+as('supervisor');
+const pb = S().items.find(i => i.cat === 'product' && i.group === 'مصنعات');
+const mt = S().items.find(i => i.cat === 'meat' && !i.rework && E.available(i.id, E.whs('raw')) > 30000);
+const B1 = E.createBatch({ date: T, productId: pb.id, planned: 20000 });
+as('worker'); E.issue({ batchId: B1.id, itemId: mt.id, qty: 20000, date: T }); E.finishMeat({ batchId: B1.id });
+as('supervisor'); E.returnRework({ batchId: B1.id, qty: 1000, date: T });
+const bag5 = S().items.find(i => i.packFor === 500), bags0 = E.available(bag5.id, E.whs('pack'));
+E.closeBatch({ batchId: B1.id, date: T, packs: { 500: 36 } });
+const BB1 = () => S().docs.batches.find(b => b.id === B1.id);
+ok('batch closed, bags issued', BB1().status === 'closed' && E.available(bag5.id, E.whs('pack')) === bags0 - 36);
+as('supervisor'); ok('supervisor cannot reopen a batch', !!refused(() => E.reopenBatch({ batchId: B1.id, reason: 'فحص' })));
+as('owner'); E.reopenBatch({ batchId: B1.id, reason: 'عدد العبوات غلط' });
+ok('reopened: packs out of the freezer, bags back, status packing', BB1().status === 'packing' && E.available(bag5.id, E.whs('pack')) === bags0 && E.available(pb.id, E.whs('fg'), 500) === E.available(pb.id, E.whs('fg'), 500) && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
+as('supervisor'); E.closeBatch({ batchId: B1.id, date: T, packs: { 500: 37 } });
+ok('closed again with the right count, books sound', BB1().status === 'closed' && BB1().output === 18500 && BB1().reopens.length === 1 && sound());
+as('sales'); const sold = E.invoice({ date: T, customerId: cust.id, lines: [{ productId: pb.id, packSize: 500, count: Math.floor(E.available(pb.id, E.whs('fg'), 500) / 500) }], method: 'credit' });
+as('owner'); const mb = refused(() => E.reopenBatch({ batchId: B1.id, reason: 'تاني' })) || '';
+ok('sold packs block reopen, naming the invoice', mb.includes(sold.no) && mb.includes('مينفعش التشغيلة تتفتح'), mb);
+// cancel an open batch and a closed one
+as('supervisor'); const B2 = E.createBatch({ date: T, productId: pb.id, planned: 5000 }); as('worker'); E.issue({ batchId: B2.id, itemId: mt.id, qty: 5000, date: T });
+const mt0 = E.available(mt.id, E.whs('raw'));
+as('owner'); E.cancelBatch({ batchId: B2.id, reason: 'اتفتحت غلط' });
+ok('cancel an open batch: meat back', S().docs.batches.find(b => b.id === B2.id).status === 'cancelled' && E.available(mt.id, E.whs('raw')) === mt0 + 5000 && sound());
+as('supervisor'); const B3 = E.createBatch({ date: T, productId: pb.id, planned: 5000 }); as('worker'); E.issue({ batchId: B3.id, itemId: mt.id, qty: 6000, date: T });
+as('supervisor'); E.returnRework({ batchId: B3.id, qty: 500, date: T }); E.closeBatch({ batchId: B3.id, date: T, packs: { 500: 10 } });
+const mt1 = E.available(mt.id, E.whs('raw'));
+as('owner'); E.cancelBatch({ batchId: B3.id, reason: 'تجربة' });
+ok('cancel a closed batch: meat, rework and bags all back, books sound', S().docs.batches.find(b => b.id === B3.id).status === 'cancelled' && E.available(mt.id, E.whs('raw')) === mt1 + 6000 && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
 
 /* ---------- per-person screens ---------- */
 as('owner');

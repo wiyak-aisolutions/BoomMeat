@@ -202,6 +202,14 @@ const fitAll = () => { cancelAnimationFrame(fitT); clearTimeout(fitT2); const ru
 new MutationObserver(fitAll).observe(document.documentElement, { childList: true, subtree: true });
 document.addEventListener('change', e => { if (e.target && e.target.matches && e.target.matches('select.f')) fitSelect(e.target); }, true);
 window.addEventListener('resize', fitAll);
+/* owner only: what an item costs us vs what it sells for, with the margin; clear markers when something is missing */
+function costSale(it, sale, { short } = {}) {
+  if (role() !== 'owner') return '';
+  const c = E.itemCost(it.id).v, p = sale != null ? sale : it.priceRetail, per = it.unit === 'pc' ? 'للقطعة' : 'للكيلو';
+  const parts = [c ? `تكلفة ${fm0(c)}` : '<span class="cs-miss">مفيش تكلفة</span>', p ? `بيع ${fm0(p)}` : '<span class="cs-miss">مفيش سعر بيع</span>'];
+  if (c && p) { const m = (p - c) / p * 100; parts.push(`<span class="cs-m ${m < 0 ? 'neg' : ''}">هامش \u2066${m.toFixed(0)}%\u2069</span>`); }
+  return `<span class="cs">${parts.join(' · ')}${short ? '' : ` <small>${per}</small>`}</span>`;
+}
 function render() {
   route = parse();
   if (!allowed(route.page) || !PAGES[route.page]) { if (route.page !== homeFor()) { location.replace('#' + homeFor()); return; } }
@@ -622,7 +630,7 @@ function table(key, cols, rows, { onRow, empty = 'مفيش بيانات', foot }
 ACTS.more = k => { LIMIT[k] = (LIMIT[k] || 60) + 100; render(); };
 
 /* ---------- shared bits ---------- */
-const statusPill = st => ({ open: '<span class="pill warn">جارية</span>', closed: '<span class="pill ok">مقفولة</span>', pending: '<span class="pill warn">مستني موافقة</span>', packing: '<span class="pill info">في التقفيل</span>', approved: '<span class="pill ok">اتوافق عليه</span>', rejected: '<span class="pill bad">مرفوض</span>' })[st] || st;
+const statusPill = st => ({ open: '<span class="pill warn">جارية</span>', closed: '<span class="pill ok">مقفولة</span>', pending: '<span class="pill warn">مستني موافقة</span>', packing: '<span class="pill info">في التقفيل</span>', cancelled: '<span class="pill bad">اتلغت</span>', approved: '<span class="pill ok">اتوافق عليه</span>', rejected: '<span class="pill bad">مرفوض</span>' })[st] || st;
 function expPill(exp) { const d = E.daysBetween(E.today(), exp); return d < 0 ? `<span class="pill bad">منتهية</span>` : d <= 3 ? `<span class="pill warn">${d} يوم</span>` : `<span class="pill mut">${d} يوم</span>`; }
 function itemOptions(filter, sel) { return S().items.filter(filter).map(i => `<option value="${i.id}" ${i.id === sel ? 'selected' : ''}>${esc(i.name)} · ${esc(i.code)}</option>`).join(''); }
 function partnerOptions(type, sel, filter = () => true) { return S().partners.filter(p => p.type === type && filter(p)).map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${esc(p.name)}</option>`).join(''); }
@@ -690,7 +698,7 @@ const LIVE_OPS = ['purchase', 'transfer', 'cutting', 'createBatch', 'issue', 're
   // Nov 2026: every operation the server accepts must be listed here, or in live mode it would only change this browser (tests check the two lists match)
   'deposit', 'payLiability', 'advance', 'advanceBack', 'custody', 'settleCustody', 'saveAccount', 'deleteAccount',
   'openButchery', 'butcheryInput', 'butcheryPack', 'butcheryOutput', 'butcheryDropOutput', 'butcheryEditOutput', 'butcheryDropInput', 'butcheryDropPack', 'newCutItem', 'closeButchery', 'finishMeat', 'returnRework',
-  'updateAccess', 'updateUserAccess', 'decideChange', 'editPurchaseLine', 'invoiceReturn', 'invoicePrice'];
+  'updateAccess', 'updateUserAccess', 'decideChange', 'editPurchaseLine', 'invoiceReturn', 'invoicePrice', 'butcheryEditInput', 'cancelButchery', 'reopenButchery', 'setCustomerPrices', 'reopenBatch', 'cancelBatch'];
 let busyN = 0;
 function busy(on) { busyN += on ? 1 : -1; let b = document.getElementById('busy'); if (busyN > 0 && !b) document.body.insertAdjacentHTML('beforeend', '<div class="busy" id="busy"><span class="busy-pill"><i></i>جاري الحفظ…</span></div>'); if (busyN <= 0 && b) b.remove(); }
 async function api(op, args) {
@@ -796,7 +804,7 @@ async function bootLive() {
   }).subscribe();
 }
 
-window.UI = { NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
+window.UI = { costSale, NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
 // WhatsApp chat button for any phone number on a profile (Egyptian mobiles: 01xxxxxxxxx → 201xxxxxxxxx)
 window.UI.waLink = ph => { const d = String(ph || '').replace(/\D/g, ''); const n = /^01\d{9}$/.test(d) ? '2' + d : /^20?1\d{9}$/.test(d) ? d.replace(/^20?/, '20') : ''; return n ? `<a class="btn wa" href="https://wa.me/${n}" target="_blank" rel="noopener">واتساب</a>` : ''; };
 window.UI.LIVE = LIVE; window.UI.loadXLSX = loadXLSX; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;

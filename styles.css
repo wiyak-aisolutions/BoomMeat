@@ -1111,3 +1111,23 @@ body.lang-out{opacity:0;transition:opacity .2s ease-in}
 /* dropdowns: no «…» — long choices get the whole row (see fitSelect in app.js) */
 select.f{text-overflow:clip}
 .fgrid > .fld.fld-wide{grid-column:1/-1}
+
+/* owner's cost vs sale tag (items, sale screen, cart, price lists, butchery, batches) */
+.cs{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-top:2px;white-space:normal}
+.cs-miss{color:var(--bad);font-weight:700}.cs-m{color:var(--ok);font-weight:800}.cs-m.neg{color:var(--bad)}.cs-own{color:var(--ok)}
+
+/* dark mode was «باهت»: firmer surfaces, brighter secondary text and edges, a clearer sidebar — light mode untouched */
+:root[data-theme="dark"]{--ink:#F7F5F1;--muted:#B9B5C0;--line:rgba(255,255,255,.13);--line2:rgba(255,255,255,.08);--glass:rgba(255,255,255,.065);--glass2:rgba(255,255,255,.08);--glass-strong:rgba(28,28,34,.92);
+  --side:linear-gradient(180deg,#1A1A21,#131318);--side-ink:#F3ECE4;--side-muted:#BBB1A8;--side-hover:rgba(255,255,255,.09)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#F5F6FA;--muted:#BCC0D0;--line:rgba(255,255,255,.14);--glass:rgba(34,36,54,.72);--glass2:rgba(34,36,54,.55);--side-ink:#F3ECE4;--side-muted:#BBB1A8}}
+:root[data-theme="dark"] .card,:root[data-theme="dark"] .kpi:not(.main){border-color:rgba(255,255,255,.11)}
+:root[data-theme="dark"] .nav{color:var(--side-ink);font-weight:650}
+:root[data-theme="dark"] .nav-g{color:var(--side-muted)}
+:root[data-theme="dark"] table.t th{color:#CFCAD6}
+:root[data-theme="dark"] .crumb,:root[data-theme="dark"] .sub{color:var(--muted)}
+
+/* calm, no moving light (client saw a sweeping line and the sidebar flickering on Windows):
+   the background glow stays still, the red card has no light sweep, and reduced-motion turns every loop off */
+.aurora i{animation:none!important}
+.kpi.main::before{animation:none!important;display:none!important}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

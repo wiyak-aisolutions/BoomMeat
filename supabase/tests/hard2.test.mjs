@@ -52,6 +52,13 @@ for (let sd = 1; sd <= SEEDS; sd++) {
     buDropPk: () => { const r = pick(S().docs.butcheries.filter(x => x.status === 'open' && x.packs.length)); return E.butcheryDropPack({ id: r.id, packId: pick(r.packs).id }); },
     buDropOut: () => { const r = pick(S().docs.butcheries.filter(x => x.status === 'open' && x.outputs.length)); return E.butcheryDropOutput({ id: r.id, lineId: pick(r.outputs).id }); },
     buClose: () => { const r = pick(S().docs.butcheries.filter(x => x.status === 'open')); return E.closeButchery({ id: r.id, date: T, wh: pick(E.whs('raw')), fgWh: pick(E.whs('fg')) }); },
+    buEditIn: () => { const r = pick(S().docs.butcheries.filter(x => x.status === 'open')); const inp = pick(r.inputs); return E.butcheryEditInput({ id: r.id, inputId: inp.id, qty: R() < 0.1 ? 0 : Math.max(1, inp.qty + ri(-Math.floor(inp.qty / 3), 20000)), reason: 'فحص وزن' }); },
+    buReopen: () => { const r = pick(S().docs.butcheries.filter(x => x.status === 'closed')); return E.reopenButchery({ id: r.id, reason: R() < 0.1 ? '' : 'فحص فتح' }); },
+    buCancel: () => { const r = pick(S().docs.butcheries.filter(x => x.status !== 'cancelled')); return E.cancelButchery({ id: r.id, reason: R() < 0.1 ? '' : 'فحص إلغاء' }); },
+    sellAny: () => { const l = pick(S().lots.filter(x => x.qty > 0 && E.rawSellable(E.item(x.itemId)) && E.sellStores(E.item(x.itemId)).includes(x.wh))); const it = E.item(l.itemId); const c = pick(credCust()); return E.invoice({ date: T, customerId: c.id, lines: [{ productId: it.id, count: R() < 0.1 ? l.qty * 50 : ri(1, Math.max(1, Math.min(l.qty, 30000))), pricePerKg: R() < 0.2 ? undefined : ri(100, 90000) }], method: R() < 0.6 ? 'credit' : 'cash' }); },
+    prices: () => { const c = pick(credCust()); const it = pick(S().items.filter(i => i.cat === 'product' || E.rawSellable(i))); return E.setCustomerPrices({ customerId: c.id, prices: R() < 0.2 ? {} : { [it.id]: R() < 0.1 ? -1 : ri(1000, 90000) } }); },
+    bReopen: () => { const b = pick(S().docs.batches.filter(x => x.status === 'closed').slice(-15)); return E.reopenBatch({ batchId: b.id, reason: R() < 0.1 ? '' : 'فحص فتح' }); },
+    bCancel: () => { const b = pick(S().docs.batches.filter(x => x.status !== 'cancelled').slice(-15)); return E.cancelBatch({ batchId: b.id, reason: 'فحص إلغاء' }); },
     batch: () => E.createBatch({ date: T, productId: pick(S().items.filter(i => i.cat === 'product')).id, planned: ri(1000, 30000) }),
     issue: () => { const b = pick(S().docs.batches.filter(E.running)); const it = pick(S().items.filter(i => ['meat', 'spice', 'pack'].includes(i.cat))); const st = it.cat === 'pack' ? E.whs('pack') : E.whs('raw'); const av = E.available(it.id, st); return E.issue({ batchId: b.id, itemId: it.id, qty: R() < 0.1 ? av + 1 : ri(1, Math.max(1, Math.min(av, it.unit === 'kg' ? 20000 : 40))), date: T }); },
     handover: () => { const b = pick(S().docs.batches.filter(x => x.status === 'open')); return E.finishMeat({ batchId: b.id, noSpice: R() < 0.5 }); },
@@ -77,7 +84,7 @@ for (let sd = 1; sd <= SEEDS; sd++) {
       else if (JSON.stringify(S()) !== before) bad(`seed ${sd} op ${i} ${n}: refused but books changed (${e.message})`);
       continue;
     }
-    if (i % 7 === 0 || ['ret', 'poEdit', 'decide', 'buClose', 'close', 'price', 'buDropIn', 'corrDecide', 'rework'].includes(n)) sound(`seed ${sd} op ${i} ${n}`);
+    if (i % 7 === 0 || ['ret', 'poEdit', 'decide', 'buClose', 'close', 'price', 'buDropIn', 'corrDecide', 'rework', 'buEditIn', 'buCancel', 'buReopen', 'sellAny', 'bReopen', 'bCancel'].includes(n)) sound(`seed ${sd} op ${i} ${n}`);
   }
   sound(`seed ${sd} end`);
   const again = JSON.parse(JSON.stringify(S())); E.setState(again); if (!E.integrity().every(c => c.ok)) bad(`seed ${sd}: integrity lost after save/reload`);
@@ -101,6 +108,12 @@ const calls = {
   butcheryDropInput: g => E.butcheryDropInput({ id: g, inputId: g }),
   butcheryDropPack: g => E.butcheryDropPack({ id: g, packId: g }),
   closeButchery: g => E.closeButchery({ id: g, date: g, wh: g }),
+  butcheryEditInput: g => E.butcheryEditInput({ id: g, inputId: g, qty: g, reason: g }),
+  cancelButchery: g => E.cancelButchery({ id: g, reason: g }),
+  reopenButchery: g => E.reopenButchery({ id: g, reason: g }),
+  reopenBatch: g => E.reopenBatch({ batchId: g, reason: g }),
+  cancelBatch: g => E.cancelBatch({ batchId: g, reason: g }),
+  setCustomerPrices: g => E.setCustomerPrices({ customerId: g, prices: g }),
   finishMeat: g => E.finishMeat({ batchId: g, noSpice: g }),
   returnRework: g => E.returnRework({ batchId: g, qty: g, date: g }),
   closeBatch: g => E.closeBatch({ batchId: (S().docs.batches.find(E.running) || {}).id, date: T, packs: { [String(g)]: g } }),
