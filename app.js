@@ -184,6 +184,24 @@ function renderTop(title, crumb, extra) {
     </div>`;
 }
 const content = () => document.getElementById('content');
+/* dropdowns never show «…»: a select whose chosen text doesn't fit takes the whole row; if it still doesn't fit, its text gets a bit smaller */
+const FIT_CANVAS = document.createElement('canvas').getContext('2d');
+function fitSelect(sel) {
+  if (!sel.offsetParent) return;
+  const opt = sel.options[sel.selectedIndex]; if (!opt) return;
+  const cs = getComputedStyle(sel);
+  const need = () => { FIT_CANVAS.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`; return FIT_CANVAS.measureText(opt.textContent.trim()).width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 30; };
+  sel.style.fontSize = '';
+  if (need() <= sel.clientWidth) return;
+  const fld = sel.closest('.fld'); if (fld && fld.parentElement && fld.parentElement.classList.contains('fgrid')) fld.classList.add('fld-wide');
+  for (let px = parseFloat(getComputedStyle(sel).fontSize) - 1; px >= 12 && need() > sel.clientWidth; px--) sel.style.fontSize = px + 'px';
+}
+let fitT = 0;
+let fitT2 = 0;
+const fitAll = () => { cancelAnimationFrame(fitT); clearTimeout(fitT2); const run = () => document.querySelectorAll('select.f').forEach(fitSelect); fitT = requestAnimationFrame(run); fitT2 = setTimeout(run, 260); }; // second pass after dialogs finish opening
+new MutationObserver(fitAll).observe(document.documentElement, { childList: true, subtree: true });
+document.addEventListener('change', e => { if (e.target && e.target.matches && e.target.matches('select.f')) fitSelect(e.target); }, true);
+window.addEventListener('resize', fitAll);
 function render() {
   route = parse();
   if (!allowed(route.page) || !PAGES[route.page]) { if (route.page !== homeFor()) { location.replace('#' + homeFor()); return; } }

@@ -407,12 +407,12 @@ const calfLots = () => S().lots.filter(l => ['carcass', 'meat', 'byproduct'].inc
 ACTS['bu-new'] = () => {
   const lots = calfLots();
   if (!lots.length) { toast('مفيش لحمة خام في التلاجات أو مخزن الاستلام', 'bad'); return; }
-  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>الخامة (عجل، صرة بالعضم…)</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}">${esc(l.code)} · ${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم · ${esc(E.whName(l.wh))}</option>`).join('')}</select></label>
+  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>الخامة (عجل، صرة بالعضم…)</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}" data-info="${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}">${esc(E.item(l.itemId).name)}</option>`).join('')}</select><small class="crumb" id="bn-info">${kgf(lots[0].qty)} كجم · ${esc(lots[0].code)} · ${esc(E.whName(lots[0].wh))}</small></label>
     <label class="fld"><span>الوزن الداخل (كجم)</span><input class="f" id="bn-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label>
     <label class="fld"><span>التاريخ</span><input class="f" id="bn-d" type="date" value="${E.today()}" max="${E.today()}"></label>
     <label class="fld"><span>ملاحظة (الجهة / المعلم)</span><input class="f" id="bn-n"></label></div>`,
   { saveText: 'فتح التشغيلة', save: async () => { const r = await E.openButchery({ date: val('bn-d'), lotId: val('bn-l'), qty: toG(val('bn-q')), note: val('bn-n') }); toast(`اتفتحت ${r.no}`, 'ok'); setTimeout(() => U.go('butchery', r.id)); } });
-  document.getElementById('bn-l').onchange = e => { document.getElementById('bn-q').value = e.target.selectedOptions[0].dataset.q / 1000; };
+  document.getElementById('bn-l').onchange = e => { const o = e.target.selectedOptions[0]; document.getElementById('bn-q').value = o.dataset.q / 1000; document.getElementById('bn-info').textContent = o.dataset.info; };
 };
 PAGES.butchery = id => {
   const s = S(), r = (s.docs.butcheries || []).find(x => x.id === id); if (!r) { U.go('cutting'); return; }
@@ -458,9 +458,9 @@ ACTS['bu-add'] = async id => {
 };
 ACTS['bu-drop'] = arg => { const [id, lineId] = arg.split('|'); run(() => E.butcheryDropOutput({ id, lineId }), 'اتشال السطر'); };
 ACTS['bu-in'] = id => { const lots = calfLots(); if (!lots.length) { toast('مفيش لحمة خام تانية في المخزن', 'bad'); return; }
-  modal('عجل / دفعة تانية على نفس التشغيلة', `<div class="fgrid"><label class="fld"><span>الدفعة</span><select class="f" id="bi-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}">${esc(l.code)} · ${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم</option>`).join('')}</select></label><label class="fld"><span>الوزن (كجم)</span><input class="f" id="bi-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label></div>`,
+  modal('عجل / دفعة تانية على نفس التشغيلة', `<div class="fgrid"><label class="fld"><span>الدفعة</span><select class="f" id="bi-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}" data-info="${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}">${esc(E.item(l.itemId).name)}</option>`).join('')}</select><small class="crumb" id="bi-info">${kgf(lots[0].qty)} كجم · ${esc(lots[0].code)} · ${esc(E.whName(lots[0].wh))}</small></label><label class="fld"><span>الوزن (كجم)</span><input class="f" id="bi-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label></div>`,
   { saveText: 'إضافة', save: async () => { await E.butcheryInput({ id, lotId: val('bi-l'), qty: toG(val('bi-q')) }); toast('اتضاف', 'ok'); } });
-  document.getElementById('bi-l').onchange = e => { document.getElementById('bi-q').value = e.target.selectedOptions[0].dataset.q / 1000; }; };
+  document.getElementById('bi-l').onchange = e => { const o = e.target.selectedOptions[0]; document.getElementById('bi-q').value = o.dataset.q / 1000; document.getElementById('bi-info').textContent = o.dataset.info; }; };
 ACTS['bu-pack'] = id => { const packs = S().items.filter(i => i.cat === 'pack');
   modal('أكياس اتصرفت على التشغيلة', `<div class="note info">تكلفة الأكياس بتتضاف على تكلفة القطعيات.</div><div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bp-i">${packs.map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${E.available(i.id, E.whs('pack'))}</option>`).join('')}</select></label><label class="fld"><span>العدد</span><input class="f" id="bp-q" type="number" min="1" step="1"></label></div>`,
   { saveText: 'صرف', save: async () => { await E.butcheryPack({ id, itemId: val('bp-i'), qty: toI(val('bp-q')) }); toast('اتصرفت الأكياس', 'ok'); } }); };

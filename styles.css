@@ -1108,3 +1108,6 @@ body.lang-out{opacity:0;transition:opacity .2s ease-in}
 @media (prefers-reduced-motion: reduce){body{animation:none}body.lang-out{transition:none}}
 .acc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px}.acc-list label{display:flex;gap:8px;align-items:center;font-size:14px;padding:4px 0}
 .wk-views button{min-height:42px;font-size:15px;padding:0 16px}.wk-views small{opacity:.7;margin-inline-start:4px}
+/* dropdowns: no «…» — long choices get the whole row (see fitSelect in app.js) */
+select.f{text-overflow:clip}
+.fgrid > .fld.fld-wide{grid-column:1/-1}
