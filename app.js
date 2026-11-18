@@ -242,6 +242,7 @@ function render() {
   catch (e) { console.error(e); content().innerHTML = `<div class="note bad">حصل خطأ في عرض الصفحة: ${esc(e.message)}</div>`; }
   const key = route.page + '/' + (route.id || '');
   if (key !== lastKey) { window.scrollTo({ top: 0 }); enterPage(); }
+  feelAfterRender(key === lastKey);
   lastKey = key;
 }
 function page(title, html, { crumb, tools } = {}) { renderTop(title, crumb, tools); content().innerHTML = html; }
@@ -411,13 +412,14 @@ function findIndex() {
   if (can('batches')) s.docs.batches.slice(-150).reverse().forEach(b => add('التشغيلات', 'batch', b.no, `${E.item(b.productId).name} · ${b.status === 'open' ? 'جارية' : 'مقفولة'} · ${df(b.date)}`, 'batch/' + b.id));
   if (can('invoices')) s.docs.invoices.slice(-300).reverse().forEach(v => add('الفواتير', 'bill', v.no, `${E.partner(v.customerId).name} · ${fm0(v.total)} ج · ${df(v.date)}`, 'invoice/' + v.id));
   if (can('purchases')) s.docs.purchases.slice(-150).reverse().forEach(x => add('المشتريات', 'receipt', x.no, `${E.partner(x.supplierId).name} · ${fm0(x.total)} ج · ${df(x.date)}${x.ref ? ' · ' + x.ref : ''}`, 'purchase/' + x.id, [x.ref]));
+  quickFor().forEach(([key, t, sub, icon]) => { add('أوامر', icon, t, sub, '', ['جديد', 'new']); out[out.length - 1].run = key; });
   NAV.forEach(([, items]) => items.forEach(([id, t, icon, roles]) => { if (canSee(id, roles)) add('الشاشات', icon, t, 'افتح الشاشة', id); }));
   return out;
 }
 let FIND = { idx: [], res: [], sel: 0 };
 function findRender(q) {
   const n = norm(q).trim().split(/\s+/).filter(Boolean);
-  const hit = n.length ? FIND.idx.filter(o => n.every(w => o.k.includes(w))) : FIND.idx.filter(o => o.group === 'الشاشات');
+  const hit = n.length ? FIND.idx.filter(o => n.every(w => o.k.includes(w))) : FIND.idx.filter(o => o.group === 'الشاشات' || o.group === 'أوامر');
   const per = {}; FIND.res = hit.filter(o => (per[o.group] = (per[o.group] || 0) + 1) <= (n.length ? 6 : 30)).slice(0, 40);
   FIND.sel = Math.min(FIND.sel, Math.max(0, FIND.res.length - 1));
   let last = '', h = '';
@@ -444,6 +446,7 @@ ACTS.find = () => {
 ACTS['find-x'] = (_, el, e) => { if (e.target === el || el.tagName === 'BUTTON') findClose(); };
 ACTS['find-go'] = i => {
   const o = FIND.res[+i]; if (!o) return; findClose();
+  if (o.run) { runQuick(o.run); return; }
   if (o.go === 'items' && o.item) { const tabsOf = { product: 'product', meat: 'meat', carcass: 'meat', spice: 'spice', pack: 'pack', byproduct: 'meat' }; TAB.it = tabsOf[o.item.cat] || 'product'; FILTER.itq = o.item.name; }
   const [pg, id] = o.go.split('/'); go(pg, id);
 };
@@ -489,6 +492,7 @@ ACTS.print = () => window.print();
 /* ---------- toast / modal ---------- */
 function toast(msg, kind) {
   const t = document.createElement('div'); t.className = 'toast ' + (kind || ''); t.textContent = msg;
+  if (kind === 'ok') HAPTIC.ok(); else if (kind === 'bad') HAPTIC.bad();
   document.getElementById('toasts').appendChild(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, kind === 'bad' ? 6000 : 3200);
 }
 let modalSave = null;
@@ -497,10 +501,11 @@ function modal(title, body, { wide, save, saveText = 'حفظ', foot = '' } = {})
   document.getElementById('modal-root').innerHTML = `<div class="ov" data-act="ovclose"><div class="md ${wide ? 'w' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="mh"><h3>${title}</h3><button class="icon-btn" data-act="mclose" aria-label="إغلاق">${ic('x')}</button></div>
     <div class="mb" id="mb">${body}</div>
-    <div class="mf">${save ? `<button class="btn p" data-act="msave">${saveText}</button>` : ''}<button class="btn" data-act="mclose">${save ? 'إلغاء' : 'إغلاق'}</button>${foot}<span class="merr" id="merr"></span></div></div></div>`;
+    <div class="mf">${save ? `<button class="btn p" data-act="msave">${saveText}<kbd class="kb" aria-hidden="true">${KB_SAVE}</kbd></button>` : ''}<button class="btn" data-act="mclose">${save ? 'إلغاء' : 'إغلاق'}</button>${foot}<span class="merr" id="merr"></span></div></div></div>`;
   const first = document.querySelector('#mb input, #mb select'); if (first) first.focus();
+  feelOpen();
 }
-function closeModal() { document.getElementById('modal-root').innerHTML = ''; modalSave = null; }
+function closeModal() { const root = document.getElementById('modal-root'); feelClose(root.querySelector('.ov'), closeModal.drag); root.innerHTML = ''; modalSave = null; }
 ACTS.mclose = closeModal;
 ACTS.ovclose = (_, el, e) => { if (e.target === el) closeModal(); };
 /* put the error under the field it belongs to (and keep the summary next to the save button) */
@@ -541,8 +546,8 @@ ACTS.msave = async (_, btn) => {
   if (!modalSave || btn.disabled) return;
   btn.disabled = true; document.getElementById('merr').textContent = '';
   const mb = document.getElementById('mb'); if (mb) clearFieldErrors(mb);
-  try { const ok = await modalSave(); if (ok !== false) { closeModal(); afterChange(); } }
-  catch (err) { const m = document.getElementById('merr'); if (m) m.textContent = err.message; if (mb && document.body.contains(mb)) pinError(mb, err.message); }
+  try { const ok = await modalSave(); if (ok !== false) { HAPTIC.ok(); closeModal(); afterChange(); } }
+  catch (err) { HAPTIC.bad(); const m = document.getElementById('merr'); if (m) m.textContent = err.message; if (mb && document.body.contains(mb)) pinError(mb, err.message); }
   finally { if (document.body.contains(btn)) btn.disabled = false; }
 };
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.querySelector('.ov')) closeModal(); });
@@ -660,7 +665,7 @@ function table(key, cols, rows, { onRow, empty = 'مفيش بيانات', foot }
   const cls = c => [c.n ? 'n' : '', c.w || WRAP_COLS.has(c.t) ? 'w' : NAME_COLS.has(c.t) ? 'nm' : ''].join(' ').trim();
   const th = cols.map(c => `<th class="${cls(c)}">${c.t}</th>`).join('');
   const tb = shown.map(r => `<tr class="${onRow ? 'click' : ''} ${r._cls || ''}" ${onRow ? `data-go="${esc(onRow(r))}"` : ''}>${cols.map(c => `<td class="${cls(c)}">${c.f(r)}</td>`).join('')}</tr>`).join('');
-  return `<div class="tw"><table class="t"><thead><tr>${th}</tr></thead><tbody>${tb || `<tr><td colspan="${cols.length}"><div class="empty">${empty}</div></td></tr>`}${foot || ''}</tbody></table></div>${rows.length > lim ? `<div class="more"><button class="btn sm" data-act="more" data-arg="${key}">عرض المزيد (${rows.length - lim} سطر)</button></div>` : ''}`;
+  return `<div class="tw${shown.length > 14 ? ' long' : ''}"><table class="t"><thead><tr>${th}</tr></thead><tbody>${tb || `<tr><td colspan="${cols.length}"><div class="empty">${empty}</div></td></tr>`}${foot || ''}</tbody></table></div>${rows.length > lim ? `<div class="more"><button class="btn sm" data-act="more" data-arg="${key}">عرض المزيد (${rows.length - lim} سطر)</button></div>` : ''}`;
 }
 ACTS.more = k => { LIMIT[k] = (LIMIT[k] || 60) + 100; render(); };
 
@@ -896,6 +901,189 @@ window.UI.boot = () => {
   if (LIVE) { bootLive(); return; }
   E.init(); E.watch(E.today()); E.save(); route = parse(); render(); flushTelegram();
 };
+/* ---------- feel (Nov 2026): touch and keyboard that respond like a native app ----------
+   phones:  a window is a sheet you drag down by its top to close (it follows the finger and keeps the flick's speed);
+            the open menu follows the finger and closes with a swipe; a short buzz on save (Android) or a light tick (iPhone)
+   laptops: ⌘/Ctrl+Enter saves, ⌘K also runs commands, «/» searches, «?» lists the shortcuts, a window grows out of the button that opened it
+   all:     long tables keep their header in view; a number that changed after a save counts to its new value once
+   Written with function declarations and var: render() may run before this part of the file is reached. */
+var FEEL_TAP = null; // where the last press was, so a window can grow out of that button
+var KB_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+var KB_SAVE = KB_MAC ? '⌘↵' : 'Ctrl+↵';
+function feelCalm() { return matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function feelPhone() { return matchMedia('(max-width:860px)').matches; }
+function feelTyping(el) { return !!(el && (el.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))); }
+
+/* a spring (damping ratio + response in seconds, as Apple describes them); starts from the current value and speed, so it can be interrupted */
+function feelSpring(from, to, v0, opt, onFrame, onDone) {
+  var damping = (opt && opt.damping) || 1, response = (opt && opt.response) || 0.35;
+  var k = Math.pow(2 * Math.PI / response, 2), c = 4 * Math.PI * damping / response, x = from, v = v0 || 0, last = performance.now(), id = 0;
+  function step(now) {
+    var dt = Math.min(0.064, (now - last) / 1000); last = now;
+    while (dt > 0) { var h = Math.min(dt, 1 / 240); v += (-k * (x - to) - c * v) * h; x += v * h; dt -= h; }
+    if (Math.abs(x - to) < 0.5 && Math.abs(v) < 20) { onFrame(to); if (onDone) onDone(); return; }
+    onFrame(x); id = requestAnimationFrame(step);
+  }
+  id = requestAnimationFrame(step);
+  var guard = setTimeout(function () { cancelAnimationFrame(id); onFrame(to); if (onDone) onDone(); }, 1500); // a hidden tab draws no frames: never leave it halfway
+  var finish = onDone; onDone = function () { clearTimeout(guard); if (finish) finish(); };
+  return function () { cancelAnimationFrame(id); clearTimeout(guard); };
+}
+function feelSwallowClick() { var f = function (ev) { ev.stopPropagation(); ev.preventDefault(); }; document.addEventListener('click', f, true); setTimeout(function () { document.removeEventListener('click', f, true); }, 80); } // only the click that ends this drag
+function feelSpeed(hist, now, at) { // px/s over the last 100 ms only: a finger that paused before letting go has no speed
+  hist.push({ y: at, x: at, t: now }); var recent = hist.filter(function (p) { return now - p.t <= 100; });
+  if (recent.length < 2) return 0; var a = recent[0], b = recent[recent.length - 1]; return (b.y - a.y) / Math.max(1, b.t - a.t) * 1000;
+}
+function feelProject(v) { var d = 0.998; return (v / 1000) * d / (1 - d); } // where a flick at v px/s would come to rest
+function feelRubber(over, dim) { var c = 0.55; return (over * dim * c) / (dim + c * Math.abs(over)); } // soft edge instead of a hard stop
+
+/* ---- haptics: Android buzzes; Safari has no vibration, but iOS 18+ ticks when a switch is toggled during a press ---- */
+var HAPTIC = (function () {
+  var sw = null, last = 0;
+  var ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function buzz(p) { var t = Date.now(); if (t - last < 300 || !navigator.vibrate || !matchMedia('(pointer:coarse)').matches) return; last = t; try { navigator.vibrate(p); } catch (_) { /* not allowed yet */ } }
+  function tick() {
+    if (!ios) return;
+    try {
+      if (!sw) { sw = document.createElement('label'); sw.setAttribute('aria-hidden', 'true'); sw.className = 'haptic-sw'; sw.innerHTML = '<input type="checkbox" switch tabindex="-1">'; document.body.appendChild(sw); }
+      sw.click();
+    } catch (_) { /* older iOS: nothing */ }
+  }
+  return { tick: tick, ok: function () { buzz(12); }, bad: function () { buzz([28, 60, 28]); } };
+})();
+document.addEventListener('pointerdown', function (e) {
+  FEEL_TAP = { x: e.clientX, y: e.clientY, t: Date.now() };
+  if (e.pointerType === 'touch' && e.target.closest && e.target.closest('[data-act="msave"],.btn.p')) HAPTIC.tick(); // iPhone tick lands with the finger
+}, true);
+
+/* ---- windows: grow from the button on laptops; on phones the sheet drags down to close ---- */
+function feelOpen() {
+  var md = document.querySelector('#modal-root .md'); if (!md || feelCalm() || feelPhone()) return;
+  var tap = FEEL_TAP; if (!tap || Date.now() - tap.t > 1200) return; // opened from the keyboard: the normal entrance
+  var r = md.getBoundingClientRect();
+  md.style.transformOrigin = (tap.x - r.left) + 'px ' + (tap.y - r.top) + 'px';
+  md.style.animation = 'none';
+  md.animate([{ opacity: 0, transform: 'scale(.86)', filter: 'blur(5px)' }, { opacity: 1, transform: 'none', filter: 'none' }], { duration: 320, easing: 'cubic-bezier(.2,.9,.25,1)' });
+}
+function feelClose(ov, drag) {
+  if (!ov || feelCalm()) return;
+  var md = ov.querySelector('.md'); if (!md) return;
+  ov.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); }); // the leaving copy must never answer getElementById
+  ov.classList.add('ov-leaving', 'no-print'); ov.removeAttribute('data-act');
+  document.body.appendChild(ov);
+  var done = function () { ov.remove(); };
+  if (feelPhone()) {
+    var h = md.getBoundingClientRect().height, y0 = drag ? drag.y : 0;
+    md.style.animation = 'none'; ov.style.animation = 'none';
+    setTimeout(done, 1200);
+    feelSpring(y0, h + 24, drag ? drag.v : 0, { damping: 1, response: 0.32 }, function (y) { md.style.transform = 'translate3d(0,' + y + 'px,0)'; ov.style.opacity = String(Math.max(0, 1 - y / h)); }, done);
+  } else {
+    md.style.animation = 'none';
+    var a = md.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.55)' }], { duration: 210, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+    ov.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 190, easing: 'ease-in', fill: 'forwards' });
+    a.onfinish = done; setTimeout(done, 400);
+  }
+}
+document.addEventListener('pointerdown', function (e) {
+  if (!feelPhone() || e.button) return;
+  var md = e.target.closest && e.target.closest('#modal-root .md'); if (!md || e.target.closest('input,select,textarea')) return;
+  var mh = md.querySelector('.mh'), r = md.getBoundingClientRect();
+  if (!mh || e.clientY > mh.getBoundingClientRect().bottom + 6) return; // only the top of the sheet (grabber + title) drags it; the body keeps scrolling
+  var ov = md.parentElement, y0 = e.clientY, y = 0, live = false, hist = [{ y: y0, t: performance.now() }];
+  if (md._feelStop) md._feelStop();
+  var move = function (ev) {
+    var d = ev.clientY - y0;
+    if (!live) { if (Math.abs(d) < 8) return; live = true; md.style.animation = 'none'; md.style.transition = 'none'; try { md.setPointerCapture(e.pointerId); } catch (_) { /* */ } }
+    y = d >= 0 ? d : -feelRubber(-d, r.height);
+    md.style.transform = 'translate3d(0,' + y + 'px,0)'; ov.style.opacity = String(Math.max(0.35, 1 - Math.max(0, y) / r.height * 0.8));
+    hist.push({ y: ev.clientY, t: performance.now() }); if (hist.length > 12) hist.shift();
+  };
+  var up = function (ev) {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+    if (!live) return;
+    var v = ev.type === 'pointercancel' ? 0 : feelSpeed(hist.map(function (p) { return { y: p.y, t: p.t }; }), performance.now(), ev.clientY);
+    feelSwallowClick(); // a drag is not a tap on the close button
+    if (y + feelProject(v) > r.height * 0.45 && v > -150) { closeModal.drag = { y: y, v: v }; closeModal(); closeModal.drag = null; return; }
+    md._feelStop = feelSpring(y, 0, v, { damping: 0.86, response: 0.32 }, function (p) { md.style.transform = p ? 'translate3d(0,' + p + 'px,0)' : ''; ov.style.opacity = String(Math.max(0.35, 1 - Math.max(0, p) / r.height * 0.8)); }, function () { md.style.transform = ''; ov.style.opacity = ''; });
+  };
+  document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+});
+
+/* ---- the phone menu follows the finger and closes with a swipe toward its edge ---- */
+document.addEventListener('pointerdown', function (e) {
+  var app = document.getElementById('app');
+  if (!feelPhone() || e.button || !app || !app.classList.contains('nav-open')) return;
+  if (!e.target.closest || !e.target.closest('#side,.scrim')) return;
+  var side = document.getElementById('side'), scrim = document.querySelector('.scrim'); if (!side) return;
+  var rtl = document.documentElement.dir !== 'ltr', w = side.getBoundingClientRect().width, out = rtl ? 1 : -1; // the direction that closes it
+  var x0 = e.clientX, y0 = e.clientY, x = 0, axis = '', hist = [{ x: x0, t: performance.now() }];
+  if (side._feelStop) side._feelStop();
+  var paint = function (p) { side.style.transform = p ? 'translateX(' + p + 'px)' : ''; if (scrim) scrim.style.opacity = String(Math.max(0, 1 - Math.abs(p) / w)); };
+  var move = function (ev) {
+    var dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if (!axis) { if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'; if (axis === 'x') { side.style.transition = 'none'; if (scrim) scrim.style.transition = 'none'; } }
+    if (axis !== 'x') return;
+    var toward = dx * out; x = toward >= 0 ? dx : -out * feelRubber(-toward, w);
+    paint(x); hist.push({ x: ev.clientX, t: performance.now() }); if (hist.length > 12) hist.shift();
+  };
+  var up = function (ev) {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+    if (axis !== 'x') return;
+    var v = ev.type === 'pointercancel' ? 0 : feelSpeed(hist.map(function (p) { return { y: p.x, t: p.t }; }), performance.now(), ev.clientX);
+    feelSwallowClick();
+    var shut = (x + feelProject(v)) * out > w * 0.4 && v * out > -150, target = shut ? out * w * 1.05 : 0;
+    side._feelStop = feelSpring(x, target, v, { damping: shut ? 1 : 0.86, response: 0.3 }, paint, function () {
+      if (shut) app.classList.remove('nav-open');
+      side.style.transform = ''; side.style.transition = ''; if (scrim) { scrim.style.opacity = ''; scrim.style.transition = ''; }
+    });
+  };
+  document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+});
+
+/* ---- keyboard ---- */
+document.addEventListener('keydown', function (e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { var b = document.querySelector('#modal-root [data-act="msave"]'); if (b && !b.disabled) { e.preventDefault(); b.click(); } return; }
+  if (e.metaKey || e.ctrlKey || e.altKey || feelTyping(e.target) || document.querySelector('#modal-root .ov,#cmd')) return;
+  if (e.key === '/' && role() !== 'worker' && document.getElementById('top') && document.getElementById('top').childElementCount) { e.preventDefault(); ACTS.find(); }
+  else if (e.key === '?' || e.key === '؟') { e.preventDefault(); ACTS.keys(); }
+});
+ACTS.keys = function () {
+  var k = function (a) { return a.split(' ').map(function (x) { return '<kbd>' + x + '</kbd>'; }).join(' '); }, mod = KB_MAC ? '⌘' : 'Ctrl';
+  var rows = [[k(mod + ' K'), 'بحث وأوامر: عميل، صنف، فاتورة، أو «بيع جديد»'], [k('/'), 'بحث سريع'], [k(mod + ' ↵'), 'حفظ النافذة المفتوحة'], [k('Esc'), 'قفل النافذة أو البحث'], [k('↑ ↓') + ' ' + k('↵'), 'تتنقل في نتايج البحث وتفتح'], [k('?'), 'القايمة دي']];
+  modal('اختصارات الكيبورد', '<div class="keys">' + rows.map(function (r) { return '<div><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>');
+};
+
+/* ---- after each screen is drawn ---- */
+var FEEL_NUMS = {}, FEEL_ANIM = {}; // last value per card, and counts still running (a second redraw right after a save must not cut them off)
+function feelAfterRender(same) {
+  document.querySelectorAll('#content .tw.long').forEach(function (tw) { if (tw._feel) return; tw._feel = 1; tw.addEventListener('scroll', function () { tw.classList.toggle('scrolled', tw.scrollTop > 2); }, { passive: true }); });
+  var now = {};
+  document.querySelectorAll('#content .kpi b').forEach(function (b, i) {
+    var small = b.parentElement && b.parentElement.querySelector('small'), key = route.page + '|' + i + '|' + (small ? small.textContent : '');
+    var walker = document.createTreeWalker(b, NodeFilter.SHOW_TEXT), node = null;
+    while (walker.nextNode()) { if (/\d/.test(walker.currentNode.nodeValue)) { node = walker.currentNode; break; } }
+    if (!node) return;
+    var m = node.nodeValue.match(/-?[\d,]+(\.\d+)?/); if (!m) return;
+    var to = parseFloat(m[0].replace(/,/g, '')), dec = m[1] ? m[1].length - 1 : 0; if (!isFinite(to)) return;
+    now[key] = to;
+    var from = FEEL_NUMS[key], an = FEEL_ANIM[key], dur = 650, t0 = performance.now();
+    if (an && an.to === to && t0 - an.t0 < dur) { from = an.from; t0 = an.t0; } // carry on with the count already running
+    else if (!same || from === undefined || from === to || feelCalm()) return;
+    else FEEL_ANIM[key] = { from: from, to: to, t0: t0 };
+    var pre = node.nodeValue.slice(0, m.index), post = node.nodeValue.slice(m.index + m[0].length);
+    var fmt = function (v) { return pre + v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + post; };
+    (function step(t) {
+      if (!node.isConnected) return;
+      var p = Math.min(1, (t - t0) / dur), e2 = 1 - Math.pow(1 - p, 3);
+      node.nodeValue = fmt(p < 1 ? from + (to - from) * e2 : to);
+      if (p >= 1) delete FEEL_ANIM[key];
+      if (p < 1) requestAnimationFrame(step);
+    })(performance.now());
+    setTimeout(function () { if (node.isConnected) node.nodeValue = fmt(to); }, dur + 150); // the right number even if no frames were drawn
+  });
+  if (!same) FEEL_NUMS = {};
+  Object.assign(FEEL_NUMS, now);
+}
 })();
 
 /* BEGIN backup-sheets: a copy of supabase/functions/_shared/backup.mjs for the «نزّل كل حاجة Excel» button (backup.test.mjs checks it matches) */

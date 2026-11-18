@@ -1157,3 +1157,45 @@ select.f{text-overflow:clip}
 .aurora i{animation:none!important}
 .kpi.main::before{animation:none!important;display:none!important}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* ===== feel (Nov 2026) — see «feel» in app.js ===== */
+/* sidebar in light mode was see-through navy over the cream page, so it read grey and dull: a solid, deeper panel with one cool text family */
+:root:not([data-theme="dark"]){--side:linear-gradient(180deg,#25283F 0%,#1C1E30 100%);--side-ink:#F2F0EC;--side-muted:#AEB3CF;--side-hover:rgba(255,255,255,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-theme="dark"]){--side:linear-gradient(180deg,rgba(18,19,30,.94),rgba(12,13,22,.96))}}
+:root:not([data-theme="dark"]) .nav{color:#EDEFF7}
+:root:not([data-theme="dark"]) .nav-g{color:var(--side-muted)}
+.nav svg{opacity:1}
+.nav:not(.on) svg{color:var(--side-muted)}
+.nav:not(.on):hover svg{color:var(--side-ink)}
+[dir="rtl"] .nav-g{letter-spacing:0} /* spacing pulls Arabic letters apart */
+.side .powered{opacity:1;color:var(--side-muted)}
+.side{box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 50px -24px rgba(20,22,40,.55)}
+
+/* shortcut hints: only where there is a keyboard */
+.btn kbd.kb{font:600 11px/1 var(--body,system-ui);padding:3px 6px;border-radius:6px;background:rgba(255,255,255,.2);color:inherit;margin-inline-start:8px;direction:ltr;unicode-bidi:isolate;opacity:.85}
+@media (hover:none),(max-width:860px){.btn kbd.kb{display:none}}
+.keys{display:flex;flex-direction:column;gap:2px}
+.keys>div{display:flex;align-items:center;gap:14px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.keys>div:last-child{border-bottom:0}
+.keys span{min-width:118px;direction:ltr;unicode-bidi:isolate;display:flex;gap:4px;justify-content:flex-end}
+.keys b{font-weight:600}
+.keys kbd{font:700 12px/1 var(--body,system-ui);min-width:24px;text-align:center;padding:5px 7px;border-radius:7px;border:1px solid var(--line);background:var(--glass2);box-shadow:0 1px 0 var(--line)}
+
+/* windows: the leaving copy can't be clicked; on phones the top of a sheet is a grab handle */
+.ov.ov-leaving{pointer-events:none;z-index:99}
+@media (max-width:860px){.md::before{width:40px;height:5px;margin:8px auto 2px}.md .mh{touch-action:none;cursor:grab}.app.nav-open .side{touch-action:pan-y}}
+.haptic-sw{position:fixed;left:-20px;top:-20px;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+
+/* long tables on laptops: the header stays in view, with a soft edge instead of a hard line once rows pass under it */
+@media (min-width:861px){
+  .tw.long{max-height:calc(100dvh - 190px);overflow:auto;overscroll-behavior:auto}
+  .tw.long table.t thead th{position:sticky;top:0;z-index:2;background:var(--glass-strong);-webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);transition:box-shadow .2s}
+  :root:not([data-theme="dark"]) .tw.long table.t thead th{background:rgba(255,255,255,.95)}
+  :root[data-theme="dark"] .tw.long table.t thead th{background:rgba(28,28,34,.96)}
+  .tw.long.scrolled table.t thead th{border-bottom-color:transparent;box-shadow:0 10px 14px -12px rgba(0,0,0,.35)}
+}
+
+/* numbers: big figures a touch tighter, all figures the same width so totals line up */
+.kpi b{letter-spacing:-.02em}
+.kpi b em{letter-spacing:0}
+table.t td.n,.n{font-variant-numeric:tabular-nums}
