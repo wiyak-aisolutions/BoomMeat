@@ -46,7 +46,10 @@ export function receiptSvg(o, company = {}) {
     const l = { name: l0 && l0.name || '', packSize: +(l0 && l0.packSize) || 0, count: +(l0 && l0.count) || 0, amount: +(l0 && l0.amount) || 0 };
     const kg = (+l.packSize || 0) / 1000, perKg = kg && l.count ? (+l.amount / (l.count * kg)) : 0;
     y += 20; T(R, y, cut(l.name, 30), { size: 13.5, w: 400, fill: '#1b1a1f' }); T(L, y, money(l.amount), { anchor: 'start', w: 700, fill: '#1b1a1f', rtl: false, size: 13.5 });
-    y += 16; T(R, y, `${l.count || 1} × ${PACK[l.packSize] || (kg ? kg + ' كيلو' : '')}${perKg ? ` · ${Math.round(perKg * 100) / 100} ج للكيلو` : ''}`, { size: 11.5, fill: '#8a8790' });
+    const raw = !!(l0 && l0.raw), grams = +(l0 && l0.grams) || 0, pieces = +(l0 && l0.pieces) || 0; // a raw cut sold by weight (or by the piece)
+    const sub = raw ? (grams ? `${Math.round(grams) / 1000} كيلو · ${Math.round(l.amount / (grams / 1000) * 100) / 100} ج للكيلو` : `${pieces || l.count} قطعة`)
+      : `${l.count || 1} × ${PACK[l.packSize] || (kg ? kg + ' كيلو' : '')}${perKg ? ` · ${Math.round(perKg * 100) / 100} ج للكيلو` : ''}`;
+    y += 16; T(R, y, sub, { size: 11.5, fill: '#8a8790' });
   }
   if (fee > 0) { y += 22; T(R, y, 'رسوم التوصيل', { size: 13.5, w: 400, fill: '#1b1a1f' }); T(L, y, money(fee), { anchor: 'start', w: 700, fill: '#1b1a1f', rtl: false, size: 13.5 }); }
   dashed();

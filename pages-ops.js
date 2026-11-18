@@ -23,6 +23,8 @@ PAGES.home = () => {
   const bM = s.docs.batches.filter(b => b.status === 'closed' && b.closeDate >= ms);
   const inKg = sumBy(bM, b => b.inputKg), outKg = sumBy(bM, b => b.output);
   const open = s.docs.batches.filter(b => b.status === 'open');
+  const BU_ = s.docs.butcheries || [], buOpen = BU_.filter(r => r.status === 'open'), buM = BU_.filter(r => r.status === 'closed' && (r.closeDate || r.date) >= ms);
+  const buIn = sumBy(buM, r => E.butIn(r)), buOut = sumBy(buM, r => E.butOut(r)), buCost = sumBy(buM, r => E.butCost(r)), buT = BU_.filter(r => r.status !== 'cancelled' && (r.closeDate || r.date) === t);
   const al = E.stockAlerts(), low = al.filter(a => a.kind === 'low'), exp = al.filter(a => a.kind === 'exp');
   const pend = s.docs.corrections.filter(c => c.status === 'pending');
   const allOk = cost ? E.integrity().every(c => c.ok) : true;
@@ -45,7 +47,7 @@ PAGES.home = () => {
     `<div class="kpi"><div class="ic">${ic('cash')}</div><small>صافي الربح الشهر</small><b style="color:var(--${is.net >= 0 ? 'ok' : 'bad'});-webkit-text-fill-color:var(--${is.net >= 0 ? 'ok' : 'bad'})">${money(is.net)}</b><span class="t">${dl(is.net, isLM.net)} بعد كل المصروفات</span></div>`,
     `<div class="kpi"><div class="ic">${ic('box')}</div><small>قيمة المخزون</small><b>${money(stockV)}</b><span class="t ${low.length ? 'w' : ''}">${low.length ? low.length + ' صنف قرب يخلص' : 'كل الأصناف فوق الحد'}</span></div>`,
   ] : [
-    `<div class="kpi main"><div class="ic">${ic('batch')}</div><small>تشغيلات جارية</small><b>${open.length}</b><span class="t">${s.docs.batches.filter(b => b.date === t).length} اتفتحت النهارده</span></div>`,
+    `<div class="kpi main"><div class="ic">${ic('batch')}</div><small>تشغيلات جارية</small><b>${open.length}</b><span class="t">${s.docs.batches.filter(b => b.date === t).length} اتفتحت النهارده · ${buOpen.length} جزارة شغالة</span></div>`,
     `<div class="kpi"><div class="ic">${ic('box')}</div><small>إنتاج الشهر</small><b>${kgf(outKg)} <em>كجم</em></b><span class="t">${bM.length} تشغيلة</span></div>`,
     `<div class="kpi"><div class="ic">${ic('knife')}</div><small>هدر الإنتاج</small><b>${pct(inKg - outKg, inKg)}</b><span class="t">${kgf(inKg - outKg)} كجم الشهر ده</span></div>`,
     `<div class="kpi"><div class="ic">${ic('bell')}</div><small>أصناف قربت تخلص</small><b>${low.length}</b><span class="t ${exp.length ? 'w' : ''}">${exp.length} دفعة صلاحيتها قربت</span></div>`,
@@ -55,7 +57,8 @@ PAGES.home = () => {
     `<div class="kpi sm"><small>مديونيات العملاء</small><b>${money(E.bal(L, '1201'))}</b><span class="t">آجل على المطاعم والمحلات</span></div>`,
     `<div class="kpi sm"><small>مستحق للموردين</small><b>${money(E.bal(L, '2101'))}</b><span class="t">الخزنة والبنك: ${fm0(U.moneyAccs('move').reduce((a, c) => a + E.bal(L, c), 0))} ج</span></div>`,
     `<div class="kpi sm"><small>إنتاج الشهر</small><b>${kgf(outKg)} <em>كجم</em></b><span class="t ${inKg && (inKg - outKg) / inKg > 0.03 ? 'dn' : 'up'}">هدر ${pct(inKg - outKg, inKg)} · ${bM.length} تشغيلة · ${open.length} جارية</span></div>`,
-  ] : [];
+    `<div class="kpi sm"><small>الجزارة الشهر ده</small><b>${kgf(buOut)} <em>كجم</em></b><span class="t ${buIn && (buIn - buOut) / buIn > 0.3 ? 'dn' : 'up'}">فقد ${pct(buIn - buOut, buIn)} · ${buM.length} تشغيلة · ${buOpen.length} شغالة</span></div>`,
+  ] : [`<div class="kpi sm"><small>الجزارة الشهر ده</small><b>${kgf(buOut)} <em>كجم</em></b><span class="t">فقد ${pct(buIn - buOut, buIn)} · ${buM.length} تشغيلة · ${buOpen.length} شغالة</span></div>`];
   const reqN = U.pendingRequests ? U.pendingRequests() : 0;
   const alertsList = [...(reqN ? [{ level: 'info', text: `${reqN} طلب حساب جديد مستني موافقتك`, go: 'users' }] : []), ...pend.map(c => ({ level: 'info', text: `طلب تصحيح ${c.no} مستني موافقة المالك`, go: 'batch/' + c.batchId })), ...low.map(a => ({ level: a.level, text: a.text, go: 'stock' })), ...exp.map(a => ({ level: a.level, text: a.text, go: 'stock' }))];
   const byWh = E.warehouses().map(w => ({ label: w.name, v: sumBy(s.lots.filter(l => l.wh === w.id && l.qty > 0 && E.item(l.itemId).unit === 'kg'), l => l.qty) }));
@@ -69,7 +72,7 @@ PAGES.home = () => {
   const cashSeries = []; { let run = cashNow; for (let i = 0; i < 14; i++) { const d = E.addDays(t, -i); cashSeries.unshift(run); run -= cashDelta[d] || 0; } }
   page('الرئيسية', `
     <div class="card hero"><button class="me-btn" data-act="me" aria-label="حسابي">${U.avatar(E.me(), 'hero-av')}</button><div style="min-width:0"><h2>${greet}، ${esc(E.me().name)}</h2><p>${esc(E.ROLES[E.me().role].name)}</p>
-      <div class="chips"><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
+      <div class="chips"><span class="chip"><b>${open.length}</b> تشغيلة جارية</span><span class="chip"><b>${buOpen.length}</b> تشغيلة جزارة شغالة</span><span class="chip ${alertsList.length ? 'warn' : ''}"><b>${alertsList.length}</b> تنبيه</span></div></div><span class="grow"></span>
       ${U.isOwner() ? `<span data-go="reports" class="pill ${allOk ? 'ok' : 'bad'}" role="button" tabindex="0" style="cursor:pointer">${allOk ? '✓ الحسابات متوازنة والمخزون مطابق' : '✗ فيه فرق في الحسابات'}</span>` : ''}</div>
     ${quick.length ? `<div class="qas">${quick.map((q, i) => `<button class="qa ${i % 2 ? 'y' : ''}" data-act="quick" data-arg="${q[0]}"><i>${ic(q[3])}</i><span><b>${q[1]}</b><small>${q[2]}</small></span></button>`).join('')}</div>` : ''}
     <div class="sec-title"><h2>${cost ? 'الأرقام' : 'الإنتاج'}</h2></div>
@@ -97,6 +100,11 @@ PAGES.home = () => {
         ${open.map(b => `<div class="li" data-go="batch/${b.id}" style="cursor:pointer"><span class="d" style="background:var(--warn)"></span><div class="x"><b class="mono">${esc(b.no)}</b> · ${esc(E.item(b.productId).name)}<small>اتصرف ${kgf(sumBy(b.issues.filter(i => !i.reversed && E.item(i.itemId).cat !== 'pack'), i => i.qty))} من ${kgf(b.planned)} كجم مخطط</small></div></div>`).join('') || '<div class="empty">مفيش تشغيلات مفتوحة</div>'}</div></div></div>
       <div class="card"><div class="hd"><h3>${cost ? 'تكلفة الكيلو · آخر التشغيلات' : 'ناتج آخر التشغيلات'}</h3></div><div class="bd">${bars(lastB.map(b => ({ label: b.no.replace('T-', ''), v: cost ? b.costPerKg : b.output, top: cost ? fm0(b.costPerKg) : kgf(b.output) })), { fmt: v => cost ? fm0(v) + ' ج/كجم' : kgf(v) + ' كجم' })}</div></div>
       <div class="card"><div class="hd"><h3>المخزون حسب المكان</h3><span class="sub">كجم</span></div><div class="bd">${hbars(byWh, v => kgf(v))}</div></div>
+    </div>
+    <div style="margin-top:16px">
+      <div class="card"><div class="hd"><h3>تشغيلات الجزارة</h3><div class="tools">${U.quickFor().some(q => q[0] === 'bu-new') ? `<button class="btn sm p" data-act="bu-new">${ic('plus')} تشغيلة جزارة جديدة</button>` : ''}<button class="btn sm" data-go="cutting">الكل</button></div></div><div class="bd">
+        <div class="chips" style="margin-bottom:8px"><span class="chip"><b>${kgf(sumBy(buT, r => E.butOut(r)))} كجم</b> ناتج النهارده</span><span class="chip"><b>${kgf(buOut)} كجم</b> ناتج الشهر</span><span class="chip"><b>${pct(buIn - buOut, buIn)}</b> فقد الشهر</span>${cost ? `<span class="chip"><b>${buOut ? fm0(E.mulDiv(buCost, 1000, buOut)) : '—'} ج</b> تكلفة الكيلو</span>` : ''}</div>
+        <div class="list">${buOpen.map(r => { const i = E.butIn(r), o = E.butOut(r); return `<div class="li" data-go="butchery/${r.id}" style="cursor:pointer"><span class="d" style="background:var(--warn)"></span><div class="x"><b class="mono">${esc(r.no)}</b> · ${r.inputs.map(x => esc(E.item(x.itemId).name)).join('، ')}<small>داخل ${kgf(i)} كجم · ناتج ${kgf(o)} كجم · فقد ${pct(i - o, i)}${cost ? ` · تكلفة ${fm0(E.butCost(r))} ج` : ''}</small></div></div>`; }).join('') || '<div class="empty">مفيش تشغيلة جزارة شغالة دلوقتي</div>'}</div></div></div>
     </div>
     <div class="grid g2">
       <div class="card"><div class="hd"><h3>المبيعات حسب نوع العميل</h3><span class="sub">الشهر ده</span></div><div class="bd">${donut(custMix)}</div></div>
@@ -177,7 +185,7 @@ PAGES.alerts = () => {
     ${!st.tgToken ? `<div class="note">التنبيهات بتتسجل هنا. ولو عايزها توصل على <b>تليجرام</b>، حط توكن البوت ورقم الشات في ${isOwner() ? '<a href="#settings">الإعدادات</a>' : 'الإعدادات'}.</div>` : ''}
     <div class="card"><div class="bd">${body}</div></div>`);
 };
-ACTS['al-read'] = id => run(() => E.markAlertsRead(id ? [id] : null));
+ACTS['al-read'] = id => run(() => E.markAlertsRead(id ? [id] : U.isOwner() || U.role() === 'accountant' ? null : S().alerts.filter(a => !a.read).map(a => a.id).slice(0, 500)));
 
 /* ========== BATCHES ========== */
 PAGES.batches = () => {
@@ -236,7 +244,7 @@ PAGES.batch = id => {
       ${runs && ['owner', 'supervisor'].includes(r) ? `<button class="btn" data-act="b-rework" data-arg="${b.id}">رجوع «إعادة تصنيع»</button><button class="btn p" data-act="b-close" data-arg="${b.id}">${ic('check')} قفل التشغيلة</button>` : ''}
       ${runs && ['worker', 'packer'].includes(r) ? `<button class="btn p" data-go="worker">شاشة الصرف</button>` : ''}
       ${U.isOwner() && b.status === 'closed' ? `<button class="btn" data-act="b-reopen" data-arg="${b.id}">افتح التشغيلة تاني</button>` : ''}${U.isOwner() && b.status !== 'cancelled' ? `<button class="btn dan" data-act="b-cancel" data-arg="${b.id}">إلغاء التشغيلة</button>` : ''}</div>
-    ${b.status === 'cancelled' ? `<div class="note bad">التشغيلة دي اتلغت (${esc(E.userName(b.cancelledBy))} · ${tf(b.cancelledAt)}): ${esc(b.cancelReason)}. كل الخامات والأكياس رجعت المخزن.</div>` : ''}${(b.reopens || []).length && b.status !== 'cancelled' ? `<div class="note">اتفتحت تاني ${b.reopens.length} مرة: ${b.reopens.map(x => esc(x.reason || '')).join('، ')}</div>` : ''}
+    ${b.status === 'cancelled' ? `<div class="note bad">التشغيلة دي اتلغت (${esc(E.userName(b.cancelledBy))} · ${tf(b.cancelledAt)}): ${esc(b.cancelReason)}. كل الخامات والأكياس رجعت المخزن.</div>` : ''}${b.status === 'closed' && b.noPack ? `<div class="note warn">اتقفلت من غير: ${b.noPack.map(esc).join('، ')}، فتكلفتهم مش داخلة على العبوات. لو اتستخدموا، افتح التشغيلة تاني واختارهم وانت بتقفل.</div>` : ''}${(b.reopens || []).length && b.status !== 'cancelled' ? `<div class="note">اتفتحت تاني ${b.reopens.length} مرة: ${b.reopens.map(x => esc(x.reason || '')).join('، ')}</div>` : ''}
     ${corr.filter(c => c.status === 'pending').map(c => `<div class="note info"><b>طلب تصحيح ${esc(c.no)}</b> من ${esc(E.userName(c.by))}: ${esc(E.item(c.itemId).name)} من ${qtyf(c.oldQty, 'kg')} إلى ${qtyf(c.newQty, 'kg')} · السبب: ${esc(c.reason)}
       ${isOwner() ? `<div class="bar" style="margin-top:8px"><button class="btn sm ok" data-act="corr-ok" data-arg="${c.id}">موافقة</button><button class="btn sm dan" data-act="corr-no" data-arg="${c.id}">رفض</button><span class="crumb">الموافقة بتعكس السطر الأصلي وتسجل الكمية الصح، والسطر الأصلي بيفضل ظاهر.</span></div>` : '<div class="crumb">مستني موافقة المالك</div>'}</div>`).join('')}
     <div class="card"><div class="bd"><div class="kv">
@@ -271,7 +279,7 @@ ACTS['corr-req'] = arg => {
   { saveText: 'إرسال للمالك', save: async () => { await E.requestCorrection({ batchId: bid, issueId: iid, newQty: it.unit === 'kg' ? toG(val('cr-q')) : toI(val('cr-q')), reason: val('cr-r') }); toast('اتبعت للمالك', 'ok'); } });
 };
 function issueForm(bid) {
-  return `<div class="fgrid"><label class="fld"><span>الصنف (من تلاجات الإنتاج)</span><select class="f" id="is-i">${S().items.filter(i => ['meat', 'spice'].includes(i.cat)).map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${kgf(E.available(i.id, E.whs('raw')))} كجم</option>`).join('')}</select></label>
+  return `<div class="fgrid"><label class="fld"><span>الصنف (من تلاجات الإنتاج)</span><select class="f" id="is-i">${S().items.filter(i => ['meat', 'spice', 'byproduct'].includes(i.cat) && !i.waste && i.active !== false).map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${kgf(E.available(i.id, E.rawStores()))} كجم</option>`).join('')}</select></label>
     <label class="fld"><span>الكمية (كجم)</span><input class="f" id="is-q" type="number" min="0.1" step="0.1"></label></div>
     <div class="note">بعد التأكيد السطر بيتقفل ومينفعش يتعدل. الأكياس والاستيكرات بتتصرف تلقائي عند القفل.</div>`;
 }
@@ -286,21 +294,27 @@ ACTS['b-close'] = bid => {
   const b = E.batchById(bid);
   const inKg = E.batchKg(b);
   const sizes = E.packsOf(E.item(b.productId));
-  const bags = sizes.map(sz => S().items.find(i => i.packFor === sz));
+  const ps = E.packStores(), stocked = S().items.filter(i => i.cat === 'pack' && i.active !== false).map(i => ({ i, n: E.available(i.id, ps) })).filter(x => x.n > 0).sort((a, c) => a.i.name.localeCompare(c.i.name, 'ar'));
+  const isBag = x => /كيس|اكياس|أكياس|فاكيوم/.test(x.i.name), isStk = x => /استيكر|ستيكر/.test(x.i.name);
+  const linked = sz => S().items.find(i => i.cat === 'pack' && i.packFor === sz && i.active !== false), stk0 = S().items.find(i => i.cat === 'pack' && i.sticker && i.active !== false);
+  const pickSel = (cls, extra, def, pref) => `<select class="f ${cls}" ${extra} style="min-width:190px"><option value="">من غير</option>${[...stocked.filter(pref), ...stocked.filter(x => !pref(x))].map(x => `<option value="${x.i.id}" ${def === x.i.id ? 'selected' : ''}>${esc(x.i.name)} · متاح ${x.n.toLocaleString('en-US')}</option>`).join('')}</select>`;
+  const defBag = sz => { const l = linked(sz); return l && stocked.some(x => x.i.id === l.id) ? l.id : (stocked.find(isBag) || {}).i?.id || ''; };
   const fz = E.warehouses().filter(w => w.use === 'fg');
-  const grid = `<div class="tw"><table class="t split"><thead><tr><th>العبوة</th>${fz.map(w => `<th class="n">${esc(w.name)}</th>`).join('')}<th class="n">الإجمالي</th></tr></thead><tbody>
-    ${sizes.map((sz, k) => `<tr><td><b>${packName(sz)}</b><div class="crumb">متاح ${bags[k] ? E.available(bags[k].id, E.whs('pack')) : 0} كيس</div></td>${fz.map(w => `<td class="n"><input class="f pk" data-sz="${sz}" data-wh="${w.id}" type="number" min="0" step="1" value="0" style="width:90px"></td>`).join('')}<td class="n"><b class="pk-tot" data-sz="${sz}">0</b></td></tr>`).join('')}
+  const grid = `<div class="tw"><table class="t split"><thead><tr><th>العبوة</th><th>الكيس اللي اتعبّى فيه</th>${fz.map(w => `<th class="n">${esc(w.name)}</th>`).join('')}<th class="n">الإجمالي</th></tr></thead><tbody>
+    ${sizes.map((sz, k) => `<tr><td><b>${packName(sz)}</b></td><td>${pickSel('cl-bag', `data-sz="${sz}"`, defBag(sz), isBag)}</td>${fz.map(w => `<td class="n"><input class="f pk" data-sz="${sz}" data-wh="${w.id}" type="number" min="0" step="1" value="0" style="width:90px"></td>`).join('')}<td class="n"><b class="pk-tot" data-sz="${sz}">0</b></td></tr>`).join('')}
   </tbody></table></div>`;
-  modal(`قفل ${esc(b.no)}`, `<div class="note info">الخامات المصروفة: <b>${kgf(inKg)} كجم</b>. اكتب عدد العبوات من كل حجم <b>في كل فريزر</b>، والسيستم يحسب الناتج والهدر ويصرف الأكياس والاستيكرات تلقائي.</div>
+  modal(`قفل ${esc(b.no)}`, `<div class="note info">الخامات المصروفة: <b>${kgf(inKg)} كجم</b>. اكتب عدد العبوات من كل حجم <b>في كل فريزر</b>، واختار الكيس والاستيكر اللي اتستخدموا، والسيستم يحسب الناتج والهدر ويصرفهم من المخزن.</div>
     ${grid}
     <div class="ow-box"><div class="bar"><b>وزن مفتوح (أطباق بوزن معيّن)</b><span class="grow"></span><button class="btn sm" type="button" id="ow-add">${ic('plus')} وزن مفتوح</button></div><div id="ow-rows"></div><div class="crumb">الأطباق والتقفيلات بتاعة الوزن المفتوح بيسجلها عامل التقفيل من شاشة الصرف.</div></div>
+    <div class="fgrid"><label class="fld"><span>الاستيكر</span>${pickSel('', 'id="cl-stk"', stk0 && stocked.some(x => x.i.id === stk0.id) ? stk0.id : (stocked.find(isStk) || {}).i?.id || '', isStk)}</label></div>
     <label class="fld" style="max-width:220px"><span>تاريخ القفل</span><input class="f" id="cl-d" type="date" value="${E.today()}" max="${E.today()}"></label>
     <div class="smart"><div><small>الناتج</small><b id="cl-out">0 كجم</b></div><div><small>الهدر</small><b id="cl-w">—</b></div><div><small>عدد العبوات</small><b id="cl-n">0</b></div></div>`,
   { wide: true, saveText: 'قفل التشغيلة', save: async () => {
     const packs = {}, split = fz.map(w => ({ wh: w.id, packs: {} }));
     document.querySelectorAll('.pk').forEach(el => { const n = toI(el.value || '0') || 0; const z = +el.dataset.sz; packs[z] = (packs[z] || 0) + n; split.find(d => d.wh === el.dataset.wh).packs[z] = n; });
     document.querySelectorAll('.ow-r').forEach(row => { const z = toI(row.querySelector('.ow-g').value || '0') || 0, n = toI(row.querySelector('.ow-n').value || '0') || 0, wh = row.querySelector('.ow-w').value; if (!z || !n) return; packs[z] = (packs[z] || 0) + n; const d = split.find(x => x.wh === wh); d.packs[z] = (d.packs[z] || 0) + n; });
-    const r = await E.closeBatch({ batchId: bid, date: val('cl-d'), packs, split }); toast(`اتقفلت ${r.no}: ${kgf(r.output)} كجم`, 'ok');
+    const bagsUsed = {}; document.querySelectorAll('.cl-bag').forEach(el => { if (packs[+el.dataset.sz]) bagsUsed[+el.dataset.sz] = el.value; });
+    const r = await E.closeBatch({ batchId: bid, date: val('cl-d'), packs, split, bags: bagsUsed, sticker: val('cl-stk') }); toast(`اتقفلت ${r.no}: ${kgf(r.output)} كجم`, 'ok');
   } });
   const upd = () => { let out = 0, n = 0; const per = {}; document.querySelectorAll('.pk').forEach(el => { const c = toI(el.value || '0') || 0; out += c * +el.dataset.sz; n += c; per[el.dataset.sz] = (per[el.dataset.sz] || 0) + c; });
     document.querySelectorAll('.ow-r').forEach(row => { const z = toI(row.querySelector('.ow-g').value || '0') || 0, c = toI(row.querySelector('.ow-n').value || '0') || 0; out += z * c; n += c; });
@@ -333,7 +347,7 @@ PAGES.worker = () => {
     const packing = b.status === 'packing';
     const cats = packing ? [['pack', 'مواد تعبئة وتقفيل']] : [['meat', 'لحوم'], ['spice', 'توابل وإضافات']];
     if (!cats.some(([c]) => c === WK.cat)) { WK.cat = cats[0][0]; WK.sub = ''; WK.item = null; WK.qty = ''; }
-    const store = c => (c === 'pack' ? E.whs('pack') : E.whs('raw'));
+    const store = c => (c === 'pack' ? E.packStores() : E.rawStores());
     const pool = s.items.filter(i => i.cat === WK.cat && i.active !== false);
     const subs = WK.cat === 'meat' ? [...new Set([...E.MEAT_SECTIONS, ...pool.map(i => i.sub).filter(Boolean)])].filter(x => E.MEAT_SECTIONS.includes(x) || pool.some(i => i.sub === x)) : [];
     const unsorted = WK.cat === 'meat' && pool.some(i => !i.sub);
@@ -410,11 +424,11 @@ PAGES.cutting = () => {
   }
   page('تشغيلات الجزارة', `<div class="bar">${tb.html}</div>${body}`);
 };
-const calfLots = () => S().lots.filter(l => ['carcass', 'meat', 'byproduct'].includes(E.item(l.itemId).cat) && !E.item(l.itemId).rework && l.qty > 0 && ['raw', 'receiving'].includes(E.whUse(l.wh))).sort((a, b) => (E.item(a.itemId).cat === 'carcass' ? 0 : 1) - (E.item(b.itemId).cat === 'carcass' ? 0 : 1));
+const calfLots = () => S().lots.filter(l => ['carcass', 'meat', 'byproduct'].includes(E.item(l.itemId).cat) && !E.item(l.itemId).rework && l.qty > 0 && ['raw', 'receiving'].includes(E.whUse(l.wh))).sort((a, b) => ((E.item(a.itemId).cat === 'carcass' ? 0 : 1) - (E.item(b.itemId).cat === 'carcass' ? 0 : 1)) || b.n - a.n); // calves first, newest lot first
 ACTS['bu-new'] = () => {
   const lots = calfLots();
   if (!lots.length) { toast('مفيش لحمة خام في التلاجات أو مخزن الاستلام', 'bad'); return; }
-  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>الخامة (عجل، صرة بالعضم…)</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}" data-info="${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}">${esc(E.item(l.itemId).name)}</option>`).join('')}</select><small class="crumb" id="bn-info">${kgf(lots[0].qty)} كجم · ${esc(lots[0].code)} · ${esc(E.whName(lots[0].wh))}</small></label>
+  modal('تشغيلة جزارة جديدة', `<div class="fgrid"><label class="fld"><span>الخامة (عجل، صرة بالعضم…)</span><select class="f" id="bn-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}" data-info="${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}">${esc(E.item(l.itemId).name)} · ${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}</option>`).join('')}</select><small class="crumb" id="bn-info">${kgf(lots[0].qty)} كجم · ${esc(lots[0].code)} · ${esc(E.whName(lots[0].wh))}</small></label>
     <label class="fld"><span>الوزن الداخل (كجم)</span><input class="f" id="bn-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label>
     <label class="fld"><span>التاريخ</span><input class="f" id="bn-d" type="date" value="${E.today()}" max="${E.today()}"></label>
     <label class="fld"><span>ملاحظة (الجهة / المعلم)</span><input class="f" id="bn-n"></label></div>`,
@@ -429,7 +443,8 @@ PAGES.butchery = id => {
   const q = BU.q.trim(), shown = outs.filter(i => !q || i.name.includes(q) || i.code.toLowerCase().includes(q.toLowerCase()));
   if (!shown.some(i => i.id === BU.item)) BU.item = (shown.find(i => i.cat !== 'product') || shown[0] || {}).id || '';
   const selIt = BU.item && E.item(BU.item); if (selIt && selIt.cat === 'product') BU.mode = 'n';
-  const lineName = o => `${esc(E.item(o.itemId).name)}${o.count ? ` <small>(${o.count} × ${packName(o.packSize)})</small>` : ''}${U.isOwner() ? `<div class="no-print">${o.value != null && o.qty ? `<span class="cs">تكلفته هنا ${fm0(E.mulDiv(o.value, 1000, o.qty))} · ${E.item(o.itemId).priceRetail ? 'بيع ' + fm0(E.item(o.itemId).priceRetail) : '<span class="cs-miss">مفيش سعر بيع</span>'}${o.value != null && E.item(o.itemId).priceRetail ? ` · <span class="cs-m">هامش \u2066${((E.item(o.itemId).priceRetail - E.mulDiv(o.value, 1000, o.qty)) / E.item(o.itemId).priceRetail * 100).toFixed(0)}%\u2069</span>` : ''}</span>` : U.costSale(E.item(o.itemId), null, { short: true })}${E.item(o.itemId).fixedCost != null ? ' <small class="cs">تكلفة ثابتة ' + fm0(E.item(o.itemId).fixedCost) + '</small>' : ''}</div>` : ''}`;
+  const lineName = o => `${esc(E.item(o.itemId).name)}${o.count ? ` <small>(${o.count} × ${packName(o.packSize)})</small>` : ''}`;
+  const sale = E.butSale(r), bc = E.butCost(r), cpk = outKg ? E.mulDiv(bc, 1000, outKg) : 0, profit = sale.v - bc;
   page(`${esc(r.no)} · تشغيلة جزارة`, `<div class="sheet">
     <div class="sheet-hd no-print"><div class="statusbar"><span class="${r.status === 'open' ? 'on' : ''}">شغالة</span><span class="${r.status === 'closed' ? 'on' : ''}">مقفولة</span>${r.status === 'cancelled' ? '<span class="on">اتلغت</span>' : ''}</div><span class="grow" style="flex:1"></span>
       ${can ? `<button class="btn" data-act="bu-in" data-arg="${r.id}">${ic('plus')} عجل/دفعة تانية</button><button class="btn" data-act="bu-pack" data-arg="${r.id}">${ic('plus')} أكياس اتصرفت</button><button class="btn p" data-act="bu-close" data-arg="${r.id}">${ic('check')} قفل التشغيلة</button>` : ''}
@@ -437,7 +452,7 @@ PAGES.butchery = id => {
       ${U.isOwner() && r.status !== 'cancelled' ? `<button class="btn dan" data-act="bu-cancel" data-arg="${r.id}">إلغاء التشغيلة</button>` : ''}
       <button class="btn" data-act="print">${ic('print')} طباعة الإذن</button></div>
     <div class="smart no-print"><div><small>الداخل (العجل)</small><b>${kgf(inKg)} كجم</b></div><div><small>الناتج</small><b>${kgf(outKg)} كجم</b></div>
-      <div><small>الفقد</small><b style="color:var(--${loss < 0 ? 'bad' : 'ink'})">${kgf(loss)} كجم · ${pct(loss, inKg)}</b></div>${cost ? `<div><small>تكلفة الخامة (العجل)</small><b>${fm(r.inputs.reduce((a, i) => a + i.value, 0))} ج</b></div><div><small>تكلفة الأكياس (${r.packs.reduce((a, p) => a + p.qty, 0)} كيس)</small><b>${fm(r.packs.reduce((a, p) => a + p.value, 0))} ج</b></div><div><small>التكلفة كلها</small><b>${fm(E.butCost(r))} ج</b></div>` : `<div><small>الأكياس</small><b>${r.packs.reduce((a, p) => a + p.qty, 0)} كيس</b></div>`}</div>
+      <div><small>الفقد</small><b style="color:var(--${loss < 0 ? 'bad' : 'ink'})">${kgf(loss)} كجم · ${pct(loss, inKg)}</b></div>${cost ? `<div><small>تكلفة الخامة (العجل)</small><b>${fm(r.inputs.reduce((a, i) => a + i.value, 0))} ج</b></div><div><small>تكلفة الأكياس (${r.packs.reduce((a, p) => a + p.qty, 0)} كيس)</small><b>${fm(r.packs.reduce((a, p) => a + p.value, 0))} ج</b></div><div><small>التكلفة كلها</small><b>${fm(E.butCost(r))} ج</b></div>${U.isOwner() ? `<div><small>تكلفة الكيلو</small><b>${outKg ? fm(cpk) + ' ج' : '—'}</b></div><div><small>قيمة البيع${sale.miss ? ` <span class="cs-miss">(${sale.miss} صنف من غير سعر)</span>` : ''}</small><b>${fm(sale.v)} ج</b></div><div><small>الربح المتوقع</small><b style="color:var(--${profit < 0 ? 'bad' : 'ok'})">${fm(profit)} ج</b></div><div><small>الهامش</small><b style="color:var(--${profit < 0 ? 'bad' : 'ok'})">${sale.v ? '\u2066' + (profit / sale.v * 100).toFixed(0) + '%\u2069' : '—'}</b></div>` : ''}` : `<div><small>الأكياس</small><b>${r.packs.reduce((a, p) => a + p.qty, 0)} كيس</b></div>`}</div>
     ${r.status === 'cancelled' ? `<div class="note bad no-print">التشغيلة دي اتلغت (${esc(E.userName(r.cancelledBy))} · ${tf(r.cancelledAt)}): ${esc(r.cancelReason)}. كل الدفعات والأكياس رجعت المخزن.</div>` : ''}
     ${can && !r.packs.length ? '<div class="note no-print">لازم تسجّل الأكياس اللي اتصرفت («أكياس اتصرفت») قبل ما تقفل التشغيلة، عشان تكلفتها تدخل على القطعيات.</div>' : ''}
     ${can ? `<div class="card no-print"><div class="hd"><h3>إضافة ناتج</h3><span class="sub">بالوزن، أو بالعدد × وزن الحتة (زي ½ كيلو)</span></div><div class="bd">
@@ -472,8 +487,11 @@ ACTS['bu-in'] = id => { const lots = calfLots(); if (!lots.length) { toast('مف
   modal('عجل / دفعة تانية على نفس التشغيلة', `<div class="fgrid"><label class="fld"><span>الدفعة</span><select class="f" id="bi-l">${lots.map(l => `<option value="${l.id}" data-q="${l.qty}" data-info="${kgf(l.qty)} كجم · ${esc(l.code)} · ${esc(E.whName(l.wh))}">${esc(E.item(l.itemId).name)}</option>`).join('')}</select><small class="crumb" id="bi-info">${kgf(lots[0].qty)} كجم · ${esc(lots[0].code)} · ${esc(E.whName(lots[0].wh))}</small></label><label class="fld"><span>الوزن (كجم)</span><input class="f" id="bi-q" type="number" min="0" step="0.5" value="${lots[0].qty / 1000}"></label></div>`,
   { saveText: 'إضافة', save: async () => { await E.butcheryInput({ id, lotId: val('bi-l'), qty: toG(val('bi-q')) }); toast('اتضاف', 'ok'); } });
   document.getElementById('bi-l').onchange = e => { const o = e.target.selectedOptions[0]; document.getElementById('bi-q').value = o.dataset.q / 1000; document.getElementById('bi-info').textContent = o.dataset.info; }; };
-ACTS['bu-pack'] = id => { const packs = S().items.filter(i => i.cat === 'pack');
-  modal('أكياس اتصرفت على التشغيلة', `<div class="note info">تكلفة الأكياس بتتضاف على تكلفة القطعيات.</div><div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bp-i">${packs.map(i => `<option value="${i.id}">${esc(i.name)} · متاح ${E.available(i.id, E.whs('pack'))}</option>`).join('')}</select></label><label class="fld"><span>العدد</span><input class="f" id="bp-q" type="number" min="1" step="1"></label></div>`,
+ACTS['bu-pack'] = id => { const ps = E.packStores(), all = S().items.filter(i => i.cat === 'pack' && i.active !== false).map(i => ({ i, n: E.available(i.id, ps) }));
+  const kind = x => (x.i.packFor || /كيس|اكياس|أكياس|فاكيوم/.test(x.i.name) ? 0 : x.i.sticker || /استيكر|ستيكر/.test(x.i.name) ? 1 : 2), by = (a, c) => kind(a) - kind(c) || a.i.name.localeCompare(c.i.name, 'ar');
+  const opt = ({ i, n }) => `<option value="${i.id}">${esc(i.name)}${i.packFor ? ` (كيس ${packName(i.packFor)})` : ''} · متاح ${n.toLocaleString('en-US')}</option>`, has = all.filter(x => x.n > 0).sort(by), none = all.filter(x => !x.n).sort(by);
+  const grp = (l, k, t) => { const g = l.filter(x => kind(x) === k); return g.length ? `<optgroup label="${t}">${g.map(opt).join('')}</optgroup>` : ''; };
+  modal('أكياس اتصرفت على التشغيلة', `<div class="note info">تكلفة الأكياس بتتضاف على تكلفة القطعيات. بيتصرف من مخزن التعبئة أو مخزن الاستلام.</div><div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bp-i">${grp(has, 0, 'أكياس')}${grp(has, 1, 'استيكرات')}${grp(has, 2, 'مواد تعبئة تانية')}${none.length ? `<optgroup label="غيرهم (مفيش منهم دلوقتي)">${none.map(opt).join('')}</optgroup>` : ''}</select></label><label class="fld"><span>العدد</span><input class="f" id="bp-q" type="number" min="1" step="1"></label></div>`,
   { saveText: 'صرف', save: async () => { await E.butcheryPack({ id, itemId: val('bp-i'), qty: toI(val('bp-q')) }); toast('اتصرفت الأكياس', 'ok'); } }); };
 ACTS['bu-newitem'] = () => modal('صنف جديد من الجزارة', `<div class="fgrid"><label class="fld"><span>الاسم</span><input class="f" id="ni2-n" placeholder="مثلًا: كباب حلة"></label>
   <label class="fld"><span>النوع</span><select class="f" id="ni2-c"><option value="meat">قطعية (ليها سعر بيع)</option><option value="byproduct">ناتج (عضم، دهن، فضلات…) تكلفته صفر</option></select></label>
@@ -511,29 +529,41 @@ ACTS['bu-close'] = id => {
 /* ========== PRODUCTS (finished goods we hold, by freezer) ========== */
 PAGES.products = () => {
   const s = S(), cost = canCost(), fz = E.warehouses().filter(w => w.use === 'fg'), wf = U.FILTER.pfz || '', gf = U.FILTER.pgr || '';
-  const groups = [...new Set(s.items.filter(i => i.cat === 'product').map(i => i.group).filter(Boolean))];
+  const groups = [...new Set(s.items.filter(i => i.cat === 'product').map(i => i.group).filter(Boolean))], prNew = E.addDays(E.today(), -1);
   const rows = [];
   s.lots.filter(l => l.qty > 0 && E.item(l.itemId).cat === 'product' && fz.some(w => w.id === l.wh) && (!wf || l.wh === wf)).forEach(l => {
     const it = E.item(l.itemId); if (gf && it.group !== gf) return; if (!match('pq', it.name, it.code, l.code)) return;
     const k = l.itemId + '|' + l.wh + '|' + l.packSize; let r = rows.find(x => x.k === k);
-    if (!r) { r = { k, it, wh: l.wh, size: l.packSize, qty: 0, value: 0, exp: l.expDate, batches: new Set() }; rows.push(r); }
+    if (!r) { r = { k, it, wh: l.wh, size: l.packSize, qty: 0, value: 0, exp: l.expDate, batches: new Set(), nw: 0 }; rows.push(r); }
+    if (l.inDate >= prNew) r.nw = 1;
     r.qty += l.qty; r.value += l.value; if (l.expDate < r.exp) r.exp = l.expDate; if (l.src && l.src.no) r.batches.add(l.src.no);
   });
-  rows.sort((a, b) => a.it.name.localeCompare(b.it.name, 'ar') || a.wh.localeCompare(b.wh) || a.size - b.size);
-  const cols = [{ t: 'المنتج', f: r => `<b>${esc(r.it.name)}</b>` }, { t: 'القسم', f: r => esc(r.it.group || '') }, { t: 'الفريزر', f: r => esc(E.whName(r.wh)) }, { t: 'العبوة', f: r => packName(r.size) },
-    { t: 'العدد', n: 1, f: r => `<b>${Math.floor(r.qty / r.size)}</b>` }, { t: 'الكمية', n: 1, f: r => kgf(r.qty) + ' كجم' }, { t: 'أقرب صلاحية', f: r => `${df(r.exp)} ${expPill(r.exp)}` }, { t: 'التشغيلات', f: r => `<span class="mono">${[...r.batches].slice(0, 3).map(esc).join('، ')}</span>` }];
+  rows.sort((a, b) => (b.nw - a.nw) || a.it.name.localeCompare(b.it.name, 'ar') || a.wh.localeCompare(b.wh) || a.size - b.size); // packs that came in today or yesterday first
+  const cols = [{ t: 'المنتج', f: r => `<b>${esc(r.it.name)}</b>${r.nw ? ' <span class="pill info">جديد</span>' : ''}` }, { t: 'القسم', f: r => esc(r.it.group || '') }, { t: 'الفريزر', f: r => esc(E.whName(r.wh)) }, { t: 'العبوة', f: r => packName(r.size) },
+    { t: 'العدد', n: 1, f: r => `<b>${Math.floor(r.qty / r.size)}</b>` }, { t: 'الكمية', n: 1, f: r => kgf(r.qty) + ' كجم' }, { t: 'أقرب صلاحية', f: r => `${df(r.exp)} ${expPill(r.exp)}` }, { t: 'التشغيلات', f: r => `<span class="mono">${[...r.batches].sort().reverse().slice(0, 3).map(esc).join('، ')}</span>` }];
   if (cost) cols.push({ t: 'القيمة', n: 1, f: r => fm(r.value) }, { t: 'تكلفة الكيلو', n: 1, f: r => `<b>${fm(E.mulDiv(r.value, 1000, r.qty))}</b>` }, { t: 'سعر البيع للكيلو', n: 1, f: r => fm(r.it.priceRetail) + (r.it.priceWholesale && r.it.priceWholesale !== r.it.priceRetail ? ` <small>جملة ${fm0(r.it.priceWholesale)}</small>` : '') });
+  // raw cuts with a sale price (e.g. صره): stock per fridge, cost and price, sold by weight from the sale screen and the WhatsApp bot
+  const rawRows = [];
+  s.items.filter(i => ['meat', 'carcass', 'byproduct'].includes(i.cat) && E.rawSellable(i) && i.active !== false && i.priceRetail > 100 && match('pq', i.name, i.code)).forEach(it => {
+    for (const w of E.sellStores(it)) { const ls = s.lots.filter(l => l.itemId === it.id && l.wh === w && l.qty > 0); if (!ls.length) continue;
+      rawRows.push({ it, wh: w, qty: sumBy(ls, l => l.qty), value: sumBy(ls, l => l.value), exp: ls.map(l => l.expDate).sort()[0] }); }
+  });
+  rawRows.sort((a, b) => a.it.name.localeCompare(b.it.name, 'ar'));
+  const rawCols = [{ t: 'الصنف', f: r => `<b>${esc(r.it.name)}</b>` }, { t: 'المكان', f: r => esc(E.whName(r.wh)) }, { t: 'الكمية', n: 1, f: r => r.it.unit === 'kg' ? kgf(r.qty) + ' كجم' : r.qty + ' قطعة' }, { t: 'أقرب صلاحية', f: r => `${df(r.exp)} ${expPill(r.exp)}` },
+    ...(cost ? [{ t: 'تكلفة الكيلو', n: 1, f: r => fm(E.mulDiv(r.value, r.it.unit === 'kg' ? 1000 : 1, r.qty)) }] : []), { t: 'سعر البيع', n: 1, f: r => fm(r.it.priceRetail) + (r.it.priceWholesale && r.it.priceWholesale !== r.it.priceRetail ? ` <small>جملة ${fm0(r.it.priceWholesale)}</small>` : '') },
+    ...(U.isOwner() ? [{ t: 'الهامش', n: 1, f: r => { const c = E.mulDiv(r.value, r.it.unit === 'kg' ? 1000 : 1, r.qty); return c ? `<span class="cs-m ${r.it.priceRetail < c ? 'neg' : ''}">\u2066${((r.it.priceRetail - c) / r.it.priceRetail * 100).toFixed(0)}%\u2069</span>` : '—'; } }] : [])];
   page('المنتجات', `<div class="kpis">${fz.map(w => { const l = s.lots.filter(x => x.wh === w.id && x.qty > 0 && E.item(x.itemId).cat === 'product'); return `<div class="kpi ${wf === w.id ? 'main' : ''}"><small>${esc(w.name)}</small><b>${kgf(sumBy(l, x => x.qty))} <em>كجم</em></b><span class="t">${new Set(l.map(x => x.itemId)).size} منتج</span></div>`; }).join('')}</div>
     <div class="bar">${searchBox('pq', 'ابحث باسم المنتج أو الدفعة')}<select class="f" id="p-fz" style="width:auto"><option value="">كل الفريزرات</option>${fz.map(w => `<option value="${w.id}" ${wf === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
       <select class="f" id="p-gr" style="width:auto"><option value="">كل الأقسام</option>${groups.map(g => `<option ${gf === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
-    <div class="card"><div class="bd">${table('prd', cols, rows, { empty: 'مفيش منتج في الفريزرات' })}</div></div>`);
+    <div class="card"><div class="bd">${table('prd', cols, rows, { empty: 'مفيش منتج في الفريزرات' })}</div></div>
+    <div class="card"><div class="hd"><h3>قطعيات خام بتتباع بالوزن</h3><span class="sub">زي الصره: بتتباع من التلاجة على طول، أو تدخل جزارة أو تشغيلة</span></div><div class="bd">${table('prd-raw', rawCols, rawRows, { empty: 'مفيش قطعيات خام ليها سعر بيع في التلاجات' })}</div></div>`);
   document.getElementById('p-fz').onchange = e => { U.FILTER.pfz = e.target.value; U.render(); };
   document.getElementById('p-gr').onchange = e => { U.FILTER.pgr = e.target.value; U.render(); };
 };
 
 /* ========== STOCK ========== */
 PAGES.stock = () => {
-  const s = S(), cost = canCost();
+  const s = S(), cost = canCost(), newFrom = E.addDays(E.today(), -1), isNew = l => l.inDate >= newFrom; // came in today or yesterday
   const tb = tabs('st', [['wh', 'التلاجات والمخازن'], ['items', 'حسب الصنف'], ['lots', 'الدفعات والصلاحية'], ['tr', 'التحويلات'], ['wo', 'الإعدام والهالك']], 'wh');
   const cat = U.FILTER.scat || '', wh = U.FILTER.swh || '';
   const catSel = `<select class="f" id="s-cat" style="width:auto"><option value="">كل الأنواع</option>${Object.entries(E.CAT_NAME).map(([k, n]) => `<option value="${k}" ${cat === k ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
@@ -541,19 +571,19 @@ PAGES.stock = () => {
   let body = '', bar = '';
   const canMove = ['owner', 'storekeeper', 'supervisor'].includes(U.role()), canWO = ['owner', 'storekeeper'].includes(U.role());
   if (tb.cur === 'items') {
-    const rows = s.items.filter(i => (!cat || i.cat === cat) && match('sq', i.name, i.code)).map(i => { const ls = s.lots.filter(l => l.itemId === i.id && l.qty > 0 && (!wh || l.wh === wh)); return { i, q: sumBy(ls, l => l.qty), v: sumBy(ls, l => l.value) }; });
-    const cols = [{ t: 'الكود', f: r => `<span class="mono">${esc(r.i.code)}</span>` }, { t: 'الصنف', f: r => esc(r.i.name) }, { t: 'النوع', f: r => E.CAT_NAME[r.i.cat] }, { t: 'الرصيد', n: 1, f: r => `<b>${qtyf(r.q, r.i.unit)}</b>` }, { t: 'الحد الأدنى', n: 1, f: r => r.i.minQty ? qtyf(r.i.minQty, r.i.unit) : '—' },
+    const rows = s.items.filter(i => (!cat || i.cat === cat) && match('sq', i.name, i.code)).map(i => { const ls = s.lots.filter(l => l.itemId === i.id && l.qty > 0 && (!wh || l.wh === wh)); return { i, q: sumBy(ls, l => l.qty), v: sumBy(ls, l => l.value), nw: ls.some(isNew) }; }).map((r, k) => ({ ...r, k })).sort((a, b) => (b.nw - a.nw) || ((b.q > 0) - (a.q > 0)) || a.k - b.k); // just received first, then what we have, then the rest
+    const cols = [{ t: 'الكود', f: r => `<span class="mono">${esc(r.i.code)}</span>` }, { t: 'الصنف', f: r => esc(r.i.name) + (r.nw ? ' <span class="pill info">جديد</span>' : '') }, { t: 'النوع', f: r => E.CAT_NAME[r.i.cat] }, { t: 'الرصيد', n: 1, f: r => `<b>${qtyf(r.q, r.i.unit)}</b>` }, { t: 'الحد الأدنى', n: 1, f: r => r.i.minQty ? qtyf(r.i.minQty, r.i.unit) : '—' },
       { t: 'الحالة', f: r => !r.i.minQty ? '' : r.q === 0 ? '<span class="pill bad">خلص</span>' : r.q < r.i.minQty ? '<span class="pill warn">قرب يخلص</span>' : '<span class="pill ok">كويس</span>' }];
     if (cost) cols.push({ t: 'القيمة', n: 1, f: r => fm(r.v) }, { t: 'سعر البيع', n: 1, f: r => r.i.priceRetail ? fm(r.i.priceRetail) : '—' }, { t: 'متوسط التكلفة', n: 1, f: r => r.q ? fm(E.mulDiv(r.v, r.i.unit === 'kg' ? 1000 : 1, r.q)) + (r.i.unit === 'kg' ? ' /كجم' : ' /قطعة') : '—' });
     const tot = cost ? `<tr class="tot"><td colspan="${cols.length - 3}">الإجمالي</td><td class="n">${fm(sumBy(rows, r => r.v))}</td><td></td><td></td></tr>` : '';
     bar = catSel + whSel + searchBox('sq', 'ابحث بالاسم أو الكود');
     body = table('st-i', cols, rows, { foot: tot });
   } else if (tb.cur === 'lots') {
-    const rows = s.lots.filter(l => l.qty > 0 && (!cat || l.cat === cat) && (!wh || l.wh === wh) && match('sq', l.code, E.item(l.itemId).name)).sort((a, b) => a.expDate < b.expDate ? -1 : 1);
-    const cols = [{ t: 'الدفعة', f: l => `<span class="mono">${esc(l.code)}</span>` }, { t: 'الصنف', f: l => esc(E.item(l.itemId).name) + (l.packSize ? ` <span class="pill mut">${packName(l.packSize)}</span>` : '') }, { t: 'المكان', f: l => esc(E.whName(l.wh)) },
+    const rows = s.lots.filter(l => l.qty > 0 && (!cat || l.cat === cat) && (!wh || l.wh === wh) && match('sq', l.code, E.item(l.itemId).name)).sort((a, b) => (isNew(b) - isNew(a)) || (isNew(a) ? b.n - a.n : (a.expDate < b.expDate ? -1 : 1))); // what just came in first, then the nearest expiry
+    const cols = [{ t: 'الدفعة', f: l => `<span class="mono">${esc(l.code)}</span>${isNew(l) ? ' <span class="pill info">جديد</span>' : ''}` }, { t: 'الصنف', f: l => esc(E.item(l.itemId).name) + (l.packSize ? ` <span class="pill mut">${packName(l.packSize)}</span>` : '') }, { t: 'المكان', f: l => esc(E.whName(l.wh)) },
       { t: 'الرصيد', n: 1, f: l => `<b>${qtyf(l.qty, E.item(l.itemId).unit)}</b>${l.packSize ? ` <small>(${l.qty / l.packSize} عبوة)</small>` : ''}` }, { t: 'إنتاج', f: l => df(l.prodDate) }, { t: 'دخول', f: l => df(l.inDate) }, { t: 'صلاحية', f: l => `${df(l.expDate)} ${expPill(l.expDate)}` },
       { t: 'المصدر', f: l => `<span class="mono">${esc(l.src.no)}</span>` }];
-    if (cost) cols.push({ t: 'القيمة', n: 1, f: l => fm(l.value) }, { t: 'تكلفة الكيلو', n: 1, f: l => { const it = E.item(l.itemId); return l.qty ? `<b>${fm(E.mulDiv(l.value, it.unit === 'kg' ? 1000 : 1, l.qty))}</b>${it.unit === 'kg' ? '' : ' <small>للقطعة</small>'}` : '—'; } }, { t: 'سعر البيع', n: 1, f: l => { const it = E.item(l.itemId); return it.priceRetail ? fm(it.priceRetail) + (it.priceWholesale && it.priceWholesale !== it.priceRetail ? ` <small>جملة ${fm0(it.priceWholesale)}</small>` : '') : '<span class="cs-miss">مفيش سعر بيع</span>'; } }, ...(U.isOwner() ? [{ t: 'الهامش', n: 1, f: l => { const it = E.item(l.itemId), c = l.qty ? E.mulDiv(l.value, it.unit === 'kg' ? 1000 : 1, l.qty) : 0; return c && it.priceRetail ? `<span class="cs-m ${it.priceRetail < c ? 'neg' : ''}">\u2066${((it.priceRetail - c) / it.priceRetail * 100).toFixed(0)}%\u2069</span>` : '—'; } }] : []));
+    if (cost) cols.push({ t: 'القيمة', n: 1, f: l => fm(l.value) }, { t: 'تكلفة الكيلو', n: 1, f: l => { const it = E.item(l.itemId); return l.qty ? `<b>${fm(E.mulDiv(l.value, it.unit === 'kg' ? 1000 : 1, l.qty))}</b>${it.unit === 'kg' ? '' : ' <small>للقطعة</small>'}` : '—'; } }, { t: 'سعر البيع', n: 1, f: l => { const it = E.item(l.itemId); return it.priceRetail ? fm(it.priceRetail) + (it.priceWholesale && it.priceWholesale !== it.priceRetail ? ` <small>جملة ${fm0(it.priceWholesale)}</small>` : '') : '<span class="cs-miss">مفيش سعر بيع</span>'; } }, ...(U.isOwner() ? [{ t: 'الهامش', n: 1, f: l => { const it = E.item(l.itemId), c = l.qty ? E.mulDiv(l.value, it.unit === 'kg' ? 1000 : 1, l.qty) : 0; return c && it.priceRetail > 100 ? `<span class="cs-m ${it.priceRetail < c ? 'neg' : ''}">\u2066${((it.priceRetail - c) / it.priceRetail * 100).toFixed(0)}%\u2069</span>` : '—'; } }] : []));
     cols.push({ t: '', f: l => `<button class="btn sm" data-act="lbl" data-arg="${l.id}">باركود</button>${canMove ? ` <button class="btn sm" data-act="tr-new" data-arg="${l.id}">تحويل</button>` : ''}${canWO ? ` <button class="btn sm dan" data-act="wo-new" data-arg="${l.id}">إعدام</button>` : ''}` });
     bar = catSel + whSel + searchBox('sq', 'ابحث برقم الدفعة أو الصنف');
     body = table('st-l', cols, rows);

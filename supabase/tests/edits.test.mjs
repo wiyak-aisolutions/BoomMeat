@@ -193,14 +193,14 @@ as('owner'); const mb = refused(() => E.reopenBatch({ batchId: B1.id, reason: '�
 ok('sold packs block reopen, naming the invoice', mb.includes(sold.no) && mb.includes('مينفعش التشغيلة تتفتح'), mb);
 // cancel an open batch and a closed one
 as('supervisor'); const B2 = E.createBatch({ date: T, productId: pb.id, planned: 5000 }); as('worker'); E.issue({ batchId: B2.id, itemId: mt.id, qty: 5000, date: T });
-const mt0 = E.available(mt.id, E.whs('raw'));
+const mt0 = E.available(mt.id, E.rawStores());
 as('owner'); E.cancelBatch({ batchId: B2.id, reason: 'اتفتحت غلط' });
-ok('cancel an open batch: meat back', S().docs.batches.find(b => b.id === B2.id).status === 'cancelled' && E.available(mt.id, E.whs('raw')) === mt0 + 5000 && sound());
+ok('cancel an open batch: meat back', S().docs.batches.find(b => b.id === B2.id).status === 'cancelled' && E.available(mt.id, E.rawStores()) === mt0 + 5000 && sound());
 as('supervisor'); const B3 = E.createBatch({ date: T, productId: pb.id, planned: 5000 }); as('worker'); E.issue({ batchId: B3.id, itemId: mt.id, qty: 6000, date: T });
 as('supervisor'); E.returnRework({ batchId: B3.id, qty: 500, date: T }); E.closeBatch({ batchId: B3.id, date: T, packs: { 500: 10 } });
-const mt1 = E.available(mt.id, E.whs('raw'));
+const mt1 = E.available(mt.id, E.rawStores());
 as('owner'); E.cancelBatch({ batchId: B3.id, reason: 'تجربة' });
-ok('cancel a closed batch: meat, rework and bags all back, books sound', S().docs.batches.find(b => b.id === B3.id).status === 'cancelled' && E.available(mt.id, E.whs('raw')) === mt1 + 6000 && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
+ok('cancel a closed batch: meat, rework and bags all back, books sound', S().docs.batches.find(b => b.id === B3.id).status === 'cancelled' && E.available(mt.id, E.rawStores()) === mt1 + 6000 && sound(), JSON.stringify(E.integrity().filter(c => !c.ok)) + ' mfg ' + E.manufacturingAccount({ from: E.addDays(T, -40), to: T }).check);
 
 /* ---------- per-person screens ---------- */
 as('owner');

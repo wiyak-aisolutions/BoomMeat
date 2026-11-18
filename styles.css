@@ -1126,6 +1126,31 @@ select.f{text-overflow:clip}
 :root[data-theme="dark"] table.t th{color:#CFCAD6}
 :root[data-theme="dark"] .crumb,:root[data-theme="dark"] .sub{color:var(--muted)}
 
+/* movement between screens (like the Dr Haytham demo, kept calm): the red highlight slides to the chosen item,
+   the old screen fades out for a moment before the new one rises in, and the day/night switch opens as a circle from its button.
+   Only transform and opacity move; with «reduce motion» none of it runs. */
+.side-nav{position:relative}
+.side-nav > .nav,.side-nav > .nav-g{position:relative;z-index:1}
+.glide{position:absolute;top:0;inset-inline:0;height:0;z-index:0;border-radius:12px;pointer-events:none;background:linear-gradient(180deg,#E6604A,#C63F2B);box-shadow:inset 0 1px 0 rgba(255,255,255,.22);transition:transform .42s cubic-bezier(.2,.8,.2,1),height .42s cubic-bezier(.2,.8,.2,1),width .42s cubic-bezier(.2,.8,.2,1);will-change:transform}
+:root[data-theme="dark"] .glide{background:var(--ember)}
+.side-nav.glided .nav.on,:root[data-theme="dark"] .side-nav.glided .nav.on{background:none!important;box-shadow:none!important}
+.bnav.glided{position:fixed}
+.bnav > .glide{inset-inline:auto;left:0;top:6px;bottom:6px;height:auto;width:0;border-radius:18px;background:linear-gradient(135deg,#FF7A45,#D9442B);box-shadow:0 10px 22px -10px rgba(217,68,43,.9),inset 0 1px 0 rgba(255,255,255,.35)}
+.bnav > button{position:relative;z-index:1}
+.bnav.glided button.on{background:none!important;box-shadow:none!important}
+.content{transition:opacity .13s ease-in,transform .13s ease-in}
+.content.leave{opacity:0;transform:translate3d(0,-6px,0);pointer-events:none}
+::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-old(root){z-index:1}::view-transition-new(root){z-index:2}
+@media (prefers-reduced-motion:reduce){.glide,.content{transition:none}}
+
+/* «Powered by WIYAK»: under the account row in the sidebar, and on the sign-in card */
+.side .powered{display:flex;align-items:center;justify-content:center;gap:8px;margin:10px 6px 0;padding:8px 0 2px;border-top:1px solid rgba(255,255,255,.08);color:var(--side-muted);font:500 10.5px Montserrat,sans-serif;letter-spacing:.06em;text-decoration:none;opacity:.8;flex:none}
+.side .powered img{height:17px;width:auto;display:block}
+.side .powered:hover,.side .powered:focus-visible{opacity:1}
+.made{align-items:center;gap:8px;text-decoration:none}
+.made span{font:500 10.5px Montserrat,sans-serif;letter-spacing:.06em;color:var(--mut,#7a8a87)}
+
 /* calm, no moving light (client saw a sweeping line and the sidebar flickering on Windows):
    the background glow stays still, the red card has no light sweep, and reduced-motion turns every loop off */
 .aurora i{animation:none!important}

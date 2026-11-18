@@ -121,6 +121,7 @@ function renderBnav() {
   const unread = S().alerts.filter(a => !a.read).length;
   el.innerHTML = items.map(([id, t, icon]) => `<button class="${cur === id || route.page === id ? 'on' : ''}" data-go="${id}" ${cur === id ? 'aria-current="page"' : ''}>${ic(icon)}<span>${t}</span></button>`).join('')
     + `<button data-act="menu" aria-label="كل الشاشات">${ic('menu')}<span>المزيد</span>${unread ? `<span class="b">${unread}</span>` : ''}</button>`;
+  glide(el, el.querySelector('button.on'), 'bnav', 'x');
 }
 function quickFor() { return QUICK.filter(q => q[4].includes(role())); }
 function runQuick(key) { if (key.startsWith('go:')) go(key.slice(3)); else if (ACTS[key]) ACTS[key](); }
@@ -139,7 +140,14 @@ function homeFor() { return ['worker', 'packer'].includes(role()) ? 'worker' : '
 let route = { page: 'home', id: null }, lastKey = '';
 function parse() { const h = decodeURIComponent(location.hash.replace(/^#/, '')); const [page, id] = h.split('/'); return { page: page || homeFor(), id: id || null }; }
 function go(page, id) { const h = '#' + page + (id ? '/' + id : ''); if (location.hash === h) render(); else location.hash = h; }
-window.addEventListener('hashchange', () => { route = parse(); render(); });
+let leaveT = 0;
+window.addEventListener('hashchange', () => {
+  const nx = parse(), c = document.getElementById('content'); clearTimeout(leaveT);
+  const same = nx.page + '/' + (nx.id || '') === lastKey;
+  if (same || !c || !c.firstChild || matchMedia('(prefers-reduced-motion: reduce)').matches) { if (c) c.classList.remove('leave'); route = nx; render(); return; }
+  c.classList.add('leave'); // .13s fade, then the new screen is drawn and its cards rise in
+  leaveT = setTimeout(() => { c.classList.remove('leave'); route = parse(); render(); }, 130);
+});
 
 /* ---------- layout ---------- */
 function renderSide() {
@@ -147,7 +155,7 @@ function renderSide() {
   notifyNew(unread);
   const pend = S_.docs.corrections.filter(c => c.status === 'pending').length;
   const openB = S_.docs.batches.filter(b => b.status === 'open').length;
-  const badge = { alerts: unread, batches: openB, users: PENDING_REQ, requests: (S_.docs.changes || []).filter(c => c.status === 'pending').length + S_.docs.corrections.filter(c => c.status === 'pending').length, orders: (S_.docs.orders || []).filter(o => o.status === 'pending').length };
+  const badge = { alerts: unread, batches: openB, cutting: (S_.docs.butcheries || []).filter(r => r.status === 'open').length, users: PENDING_REQ, requests: (S_.docs.changes || []).filter(c => c.status === 'pending').length + S_.docs.corrections.filter(c => c.status === 'pending').length, orders: (S_.docs.orders || []).filter(o => o.status === 'pending').length };
   const cur = DETAIL_PARENT[route.page] || route.page;
   let h = `<div class="brand"><img src="boom-logo.png" alt="بوم ميت"></div><nav class="side-nav" aria-label="الشاشات">`;
   for (const [g, items] of NAV) {
@@ -159,11 +167,26 @@ function renderSide() {
   h += `</nav>`;
   const u = E.me();
   h += `<div class="who"><button class="me-btn" data-act="me" aria-label="حسابي">${avatar(u, 'av')}</button><div class="who-t"><b>${esc(u.name)}</b><small>${E.ROLES[u.role].name}</small></div>${LIVE ? `<button class="out" data-act="logout" aria-label="تسجيل الخروج" title="تسجيل الخروج">${ic('logout')}</button>` : ''}</div>`;
+  h += `<a class="powered" href="https://wiyak.co" target="_blank" rel="noopener" aria-label="Powered by WIYAK"><span>Powered by</span><img src="wiyak-dark.png" alt="WIYAK"></a>`;
   // redrawing must not throw the menu back to the top: keep its scroll, and keep the selected item in view
   const sideEl = document.getElementById('side'), oldNav = sideEl.querySelector('.side-nav'), keep = oldNav ? oldNav.scrollTop : 0;
   sideEl.innerHTML = h;
   const nav = sideEl.querySelector('.side-nav'), on = nav && nav.querySelector('.nav.on');
-  if (nav) { nav.scrollTop = keep; if (on) { const a = on.offsetTop - nav.offsetTop, b = a + on.offsetHeight; if (a < nav.scrollTop + 8) nav.scrollTop = Math.max(0, a - 48); else if (b > nav.scrollTop + nav.clientHeight - 8) nav.scrollTop = b - nav.clientHeight + 48; } }
+  if (nav) { nav.scrollTop = keep; if (on) { const a = on.offsetTop - (on.offsetParent === nav ? 0 : nav.offsetTop), b = a + on.offsetHeight; if (a < nav.scrollTop + 8) nav.scrollTop = Math.max(0, a - 48); else if (b > nav.scrollTop + nav.clientHeight - 8) nav.scrollTop = b - nav.clientHeight + 48; } }
+  glide(nav, on, 'side', 'y');
+}
+/* the red highlight slides from the old menu item to the new one (the menu is redrawn on every render, so the last spot is remembered) */
+const GLIDE = {};
+function glide(box, on, key, axis) {
+  if (!box) return; box.classList.remove('glided');
+  if (!on || !on.offsetParent) { delete GLIDE[key]; return; }
+  const to = axis === 'x' ? { o: on.offsetLeft, s: on.offsetWidth } : { o: on.offsetTop - (on.offsetParent === box ? 0 : box.offsetTop), s: on.offsetHeight };
+  const from = GLIDE[key] || to, g = document.createElement('span'); g.className = 'glide'; g.setAttribute('aria-hidden', 'true');
+  const put = p => { g.style.transform = axis === 'x' ? `translate3d(${p.o}px,0,0)` : `translate3d(0,${p.o}px,0)`; g.style[axis === 'x' ? 'width' : 'height'] = p.s + 'px'; };
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches || (from.o === to.o && from.s === to.s);
+  g.style.transition = 'none'; put(still ? to : from); box.insertBefore(g, box.firstChild); box.classList.add('glided');
+  if (!still) { void g.offsetWidth; g.style.transition = ''; put(to); }
+  GLIDE[key] = to;
 }
 function renderTop(title, crumb, extra) {
   const unread = S().alerts.filter(a => !a.read).length;
@@ -205,7 +228,7 @@ window.addEventListener('resize', fitAll);
 /* owner only: what an item costs us vs what it sells for, with the margin; clear markers when something is missing */
 function costSale(it, sale, { short } = {}) {
   if (role() !== 'owner') return '';
-  const c = E.itemCost(it.id).v, p = sale != null ? sale : it.priceRetail, per = it.unit === 'pc' ? 'للقطعة' : 'للكيلو';
+  const c = E.itemCost(it.id).v, p0 = sale != null ? sale : it.priceRetail, p = p0 > 100 ? p0 : 0 /* 1 ج is a placeholder in the imported file, not a real price */, per = it.unit === 'pc' ? 'للقطعة' : 'للكيلو';
   const parts = [c ? `تكلفة ${fm0(c)}` : '<span class="cs-miss">مفيش تكلفة</span>', p ? `بيع ${fm0(p)}` : '<span class="cs-miss">مفيش سعر بيع</span>'];
   if (c && p) { const m = (p - c) / p * 100; parts.push(`<span class="cs-m ${m < 0 ? 'neg' : ''}">هامش \u2066${m.toFixed(0)}%\u2069</span>`); }
   return `<span class="cs">${parts.join(' · ')}${short ? '' : ` <small>${per}</small>`}</span>`;
@@ -232,7 +255,7 @@ function addExcelButton() {
 }
 function loadXLSX() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
-  return new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = () => ok(window.XLSX); sc.onerror = () => no(new Error('تعذر تحميل أداة Excel، اتأكد من الإنترنت')); document.head.appendChild(sc); });
+  return new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.integrity = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw'; sc.crossOrigin = 'anonymous'; sc.onload = () => ok(window.XLSX); sc.onerror = () => no(new Error('تعذر تحميل أداة Excel، اتأكد من الإنترنت')); document.head.appendChild(sc); });
 }
 function cellValue(td) {
   const t = (td.innerText || '').replace(/\s+/g, ' ').trim();
@@ -442,7 +465,19 @@ ACTS.acctmenu = (_, el) => {
 document.addEventListener('click', e => { const m = document.getElementById('acctmenu'); if (m && !e.target.closest('[data-act="acctmenu"]') && (!e.target.closest('#acctmenu') || e.target.closest('[data-act]'))) setTimeout(() => m.remove()); }, true);
 ACTS.logout = async () => { if (SB) await SB.auth.signOut(); location.hash = ''; location.reload(); };
 function isDark() { return (document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark'; }
+let themeTap = null;
+document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('[data-act="theme"]')) themeTap = { x: e.clientX, y: e.clientY, t: Date.now() }; }, true);
 ACTS.theme = () => {
+  const tap = themeTap; themeTap = null;
+  if (!document.startViewTransition || !tap || Date.now() - tap.t > 1500 || matchMedia('(prefers-reduced-motion: reduce)').matches) { setTheme(); return; }
+  const r = Math.hypot(Math.max(tap.x, innerWidth - tap.x), Math.max(tap.y, innerHeight - tap.y));
+  try {
+    document.startViewTransition(() => setTheme()).ready.then(() => {
+      document.documentElement.animate({ clipPath: [`circle(0px at ${tap.x}px ${tap.y}px)`, `circle(${r}px at ${tap.x}px ${tap.y}px)`] }, { duration: 620, easing: 'cubic-bezier(.2,.8,.2,1)', pseudoElement: '::view-transition-new(root)' });
+    }).catch(() => {});
+  } catch (_e) { setTheme(); }
+};
+function setTheme() {
   const nx = isDark() ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', nx);
   const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = nx === 'dark' ? '#0F0C0B' : '#17110F';
   try { localStorage.setItem('boom-theme', nx); } catch (e) { /* ignore */ }
@@ -713,9 +748,22 @@ async function api(op, args) {
   } catch (e) { if (e instanceof TypeError) throw new Error('مفيش اتصال بالإنترنت'); throw e; }
   finally { busy(false); }
 }
+async function fetchBooks() { // cost roles read the books directly; everyone else gets the copy the server filters for their screens
+  if (E.ROLES[PROFILE.role] && E.ROLES[PROFILE.role].cost) {
+    const { data, error } = await SB.from('erp_state').select('version,state').eq('id', 1).single();
+    if (error) throw new Error('تعذر تحميل البيانات: ' + error.message);
+    return data;
+  }
+  const { data: { session } } = await SB.auth.getSession();
+  if (!session) { location.reload(); throw new Error('سجل دخول تاني'); }
+  let r, j = {};
+  try { r = await fetch(`${CFG.url}/functions/v1/erp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: CFG.anonKey }, body: JSON.stringify({ op: 'state' }) }); j = await r.json(); }
+  catch (e) { throw new Error('تعذر تحميل البيانات: مفيش اتصال بالإنترنت'); }
+  if (!r.ok || !j.state) throw new Error('تعذر تحميل البيانات: ' + (j.error || 'السيرفر مش بيرد'));
+  return { version: j.version, state: j.state };
+}
 async function loadState() {
-  const { data, error } = await SB.from('erp_state').select('version,state').eq('id', 1).single();
-  if (error) throw new Error('تعذر تحميل البيانات: ' + error.message);
+  const data = await fetchBooks();
   E.setState(data.state); VERSION = data.version;
   E.S.currentUser = PROFILE.user_id;
   if (!E.S.users.some(u => u.id === PROFILE.user_id)) E.S.users.push({ id: PROFILE.user_id, username: PROFILE.username, name: PROFILE.name, role: PROFILE.role, active: PROFILE.active });
@@ -730,7 +778,7 @@ function authShell(tab, inner) {
     <div class="box glass"><div class="lang-pill"><button type="button" class="btn sm" data-act="lang">${LANG === 'en' ? 'العربية' : 'English'}</button><button type="button" class="icon-btn" data-act="theme" aria-label="الوضع الليلي">${ic(isDark() ? 'sun' : 'moon')}</button></div><div class="logo-tile"><img src="boom-logo.png" alt="Boom Meat"></div><h1>بوم ميت</h1><p>سيستم بوم ميت للمخازن والإنتاج والحسابات</p>
     <div class="tabs" role="tablist"><button type="button" role="tab" class="${tab === 'in' ? 'on' : ''}" aria-selected="${tab === 'in'}" data-act="login-form">تسجيل الدخول</button><button type="button" role="tab" class="${tab === 'req' ? 'on' : ''}" aria-selected="${tab === 'req'}" data-act="req-form">إنشاء حساب</button></div>
     ${inner}
-    <div class="made"><img class="lt" src="wiyak-light.png" alt="WIYAK"><img class="dk" src="wiyak-dark.png" alt="WIYAK"></div></div></div>`;
+    <a class="made" href="https://wiyak.co" target="_blank" rel="noopener" aria-label="Powered by WIYAK"><span>Powered by</span><img class="lt" src="wiyak-light.png" alt="WIYAK"><img class="dk" src="wiyak-dark.png" alt="WIYAK"></a></div></div>`;
 }
 function loginScreen(msg) {
   document.getElementById('app').innerHTML = authShell('in', `<form id="login-form" autocomplete="on" style="display:flex;flex-direction:column;gap:14px">
@@ -804,10 +852,19 @@ async function bootLive() {
   }).subscribe();
 }
 
-window.UI = { costSale, NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
+/* a price that looks like a typo (e.g. 20,000 instead of 200) needs a second «حفظ»: > 5,000 ج, or more than 3× / less than ⅓ of the cost (or, with no cost, of the other price) */
+let PRICE_OK = '';
+function priceCheck(rows) { // rows: [{ name, price, refs: [piasters…] }] — throws once with the reasons; the same values saved again go through
+  const odd = rows.filter(r => r.price > 0).map(r => { const refs = r.refs.filter(x => x > 0).slice(0, 1); // the first known reference: the cost, else the other price
+    const why = r.price > 500000 ? 'أكتر من 5,000 ج' : refs.some(x => r.price > x * 3) ? `أكتر من 3 أضعاف ${fm0(Math.min(...refs))} ج` : refs.some(x => r.price * 3 < x) ? `أقل من تلت ${fm0(Math.max(...refs))} ج` : '';
+    return why ? `«${r.name}» ${fm0(r.price)} ج: ${why}` : ''; }).filter(Boolean);
+  const sig = JSON.stringify(rows.map(r => r.price)); if (!odd.length || PRICE_OK === sig) { PRICE_OK = ''; return; }
+  PRICE_OK = sig; throw new Error(`السعر ده شكله غلط: ${odd.join('، ')}. راجعه، ولو متأكد دوس «حفظ» تاني.`);
+}
+window.UI = { priceCheck, costSale, NAV, rolesFor, LOCKED, avatar, userObj, pinError, clearFieldErrors, lang: () => LANG, E, S, esc, tx, fm, fm0, kgf, qtyf, pct, df, dfl, tf, packName, toG, toP, toI, role, canCost, isOwner, accName, initials, ic, PAGES, ACTS, go, render, page, modal, closeModal, run, toast, val, table, bars, spark, donut, hbars, lolli, ring, area, statusPill, expPill, itemOptions, partnerOptions, methodOptions, moneyAccs, moneyOptions, ownerOnlyAcc, chatter, periodBar, period, tabs, searchBox, match, barcode, TG, testTelegram, flushTelegram, content, afterChange, FILTER, TAB, ALL };
 // WhatsApp chat button for any phone number on a profile (Egyptian mobiles: 01xxxxxxxxx → 201xxxxxxxxx)
 window.UI.waLink = ph => { const d = String(ph || '').replace(/\D/g, ''); const n = /^01\d{9}$/.test(d) ? '2' + d : /^20?1\d{9}$/.test(d) ? d.replace(/^20?/, '20') : ''; return n ? `<a class="btn wa" href="https://wa.me/${n}" target="_blank" rel="noopener">واتساب</a>` : ''; };
-window.UI.LIVE = LIVE; window.UI.loadXLSX = loadXLSX; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
+window.UI.loadState = loadState; window.UI.LIVE = LIVE; window.UI.loadXLSX = loadXLSX; window.UI.api = api; window.UI.quickFor = quickFor; window.UI.runQuick = runQuick;
 window.UI.profile = () => PROFILE; window.UI.pendingRequests = () => PENDING_REQ; window.UI.countRequests = countRequests; window.UI.sb = () => SB;
 /* ---------- motion: page entrance, count-up numbers, cursor light + 3D tilt ---------- */
 const CALM = matchMedia('(prefers-reduced-motion: reduce)');

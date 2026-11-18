@@ -3,7 +3,7 @@
 // approvals only count from the owner's linked chat, and requests are validated and capped.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
-import { syncUser, runOp } from '../_shared/core.mjs';
+import { syncUser, runOp, requestGate, sameSecret } from '../_shared/core.mjs';
 import { notifyBot } from '../_shared/notify.ts';
 import { ownerReply, MENU } from '../_shared/ownerbot.mjs';
 import { getViewers, setViewers, copyText, MAX_VIEWERS, VIEWER_NOTE } from '../_shared/viewers.ts';
@@ -43,12 +43,21 @@ const requestText = (p: { name: string, username: string, phone?: string }) => `
 async function sendRequest(chat: string, p: { user_id: string, name: string, username: string, phone?: string }) {
   await tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', text: requestText(p), reply_markup: roleKeyboard(p.user_id) });
 }
-async function requestAccount(b: Record<string, string>) {
+async function ipTag(req: Request) { // a short, non-reversible tag of the caller's address, only to count repeats
+  const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown';
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('boom-req:' + ip)));
+  return Array.from(h.slice(0, 6), x => x.toString(16).padStart(2, '0')).join('');
+}
+async function requestAccount(b: Record<string, string>, req: Request) {
   const name = String(b.name || '').trim(), username = String(b.username || '').trim().toLowerCase(), password = String(b.password || ''), phone = String(b.phone || '').trim();
   if (name.length < 3 || name.length > 60) return json(400, { error: 'اكتب اسمك (٣ حروف على الأقل)', field: 'name' });
   if (!/^[a-z0-9._-]{3,30}$/.test(username)) return json(400, { error: 'اسم الدخول: حروف إنجليزي صغيرة وأرقام بس (٣ حروف على الأقل)', field: 'username' });
   if (password.length < 8 || password.length > 72) return json(400, { error: 'الباسورد لازم ٨ حروف على الأقل', field: 'password' });
   if (!/^[0-9+\s-]{8,20}$/.test(phone)) return json(400, { error: 'اكتب رقم تليفون صحيح', field: 'phone' });
+  let log: unknown = []; try { log = JSON.parse(await secret('req_log') || '[]'); } catch (_e) { log = []; }
+  const gate = requestGate(log, Date.now(), await ipTag(req));
+  if (!gate.ok) return json(429, { error: 'فيه طلبات كتير دلوقتي. جرّب بعد شوية أو كلم المالك' });
+  await setSecret('req_log', JSON.stringify(gate.log));
   const { count } = await admin.from('profiles').select('user_id', { count: 'exact', head: true }).eq('role', 'pending').eq('active', false);
   if ((count || 0) >= 30) return json(429, { error: 'فيه طلبات كتير مستنية. حاول بعدين أو كلم المالك' });
   const { data: exists } = await admin.from('profiles').select('user_id').eq('username', username).maybeSingle();
@@ -287,19 +296,19 @@ Deno.serve(async (req) => {
     const tgSecret = req.headers.get('X-Telegram-Bot-Api-Secret-Token');
     if (tgSecret !== null) {
       const want = await secret('tg_webhook_secret');
-      if (!want || tgSecret !== want) return json(401, { error: 'bad secret' });
+      if (!sameSecret(tgSecret, want)) return json(401, { error: 'bad secret' });
       await telegramUpdate(await req.json());
       return json(200, { ok: true });
     }
     const bk = req.headers.get('x-backup-key');
     if (bk !== null) {
       const want = await secret('backup_key');
-      if (!want || bk !== want) return json(401, { error: 'bad key' });
+      if (!sameSecret(bk, want)) return json(401, { error: 'bad key' });
       const b = await req.json().catch(() => ({}));
       return await sendBackup(!!(b && b.force));
     }
     const body = await req.json();
-    if (body && body.action === 'request') return await requestAccount(body);
+    if (body && body.action === 'request') return await requestAccount(body, req);
     return json(400, { error: 'طلب غير معروف' });
   } catch (e) { return json(500, { error: (e as Error).message || 'خطأ في السيرفر' }); }
 });

@@ -106,5 +106,22 @@ ok('close refused naming the unpriced cut', mm.includes('برسكت فحص بد�
 as('owner'); E.saveItem({ ...E.item(noP.id), fixedCost: 25000 }); as('supervisor'); E.closeButchery({ id: rn.id, date: T });
 ok('with a fixed cost it closes and carries it', S().docs.butcheries.find(x => x.id === rn.id).outputs[0].value === 20 * 25000 && sound());
 
+/* ---------- v101: sale value of a run, bags bought into receiving, labelled trial stock ---------- */
+{ const r = S().docs.butcheries.find(x => x.id === rn.id), sv = E.butSale(r);
+  ok('butSale: priced cuts + the fixed-number cut at its number', sv.v === E.mulDiv(cutA.priceRetail, 60000, 1000) + E.mulDiv(25000, 20000, 1000) && sv.miss === 0, JSON.stringify(sv)); }
+as('owner'); const bag = E.saveItem({ name: 'كيس فحص 25*35', cat: 'pack', unit: 'pc', priceRetail: 100 });
+{ const sp = S().partners.find(p => p.type === 'supplier'); if (sp.items && sp.items.length) sp.items.push(bag.id); }
+as('storekeeper'); E.purchase({ date: T, supplierId: S().partners.find(p => p.type === 'supplier').id, ref: 'BG', lines: [{ itemId: bag.id, qty: 500, unitCost: 1000, expDate: E.addDays(T, 300) }] });
+ok('bags bought land in receiving', E.available(bag.id, E.whs('receiving')) === 500 && E.available(bag.id, E.whs('pack')) === 0);
+{ const cc = S().items.find(i => i.cat === 'carcass'); E.purchase({ date: T, supplierId: S().partners.find(p => p.type === 'supplier').id, ref: 'C2', lines: [{ itemId: cc.id, qty: 100000, unitCost: 30000, expDate: E.addDays(T, 9) }] });
+  as('supervisor'); const lot = S().lots.filter(l => l.itemId === cc.id && l.qty > 0).at(-1); const r2 = E.openButchery({ date: T, lotId: lot.id, qty: 50000 });
+  E.butcheryPack({ id: r2.id, itemId: bag.id, qty: 40 });
+  ok('butchery takes bags from receiving', E.available(bag.id, E.packStores()) === 460 && S().docs.butcheries.find(x => x.id === r2.id).packs[0].value === 40000 && sound()); }
+as('owner'); { const it = S().items.find(i => i.cat === 'spice'); const je = E.openingBalances({ date: T, stock: [{ itemId: it.id, qty: 5000, unitCost: 10000, expDate: E.addDays(T, 200) }], note: 'رصيد تجربة' });
+  ok('trial stock is labelled and balanced', je.memo.startsWith('رصيد تجربة') && S().docs.openings.at(-1).note === 'رصيد تجربة' && sound(), je.memo); }
+
+{ as('owner'); const m = S().items.find(i => i.cat === 'meat' && i.priceRetail > 0 && !i.fixedCost);
+  E.saveItem({ ...m, fixedCost: 35000, priceRetail: 15000, priceWholesale: 2000000 });
+  ok('fixed number = cost and the one sale price', E.item(m.id).fixedCost === 35000 && E.item(m.id).priceRetail === 35000 && E.item(m.id).priceWholesale === 35000); }
 console.log(`pricing checks: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

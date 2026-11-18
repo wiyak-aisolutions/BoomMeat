@@ -11,6 +11,7 @@ export const OPS = new Set([
   'saveItem', 'savePartner', 'resetBooks', 'updateSelf', 'saveWarehouse', 'updateSettings', 'markAlertsRead', 'openingBalances', 'setRecipe', 'dailyCheck', 'decideOrder',
 ]);
 
+const NO_ARG_OPS = new Set(['resetBooks', 'dailyCheck']), POSITIONAL_OPS = new Set(['decideChange', 'decideCorrection', 'markAlertsRead', 'setRecipe', 'deleteAccount']);
 function syncActor(E, profile) {
   const S = E.S;
   let u = S.users.find(x => x.id === profile.user_id);
@@ -29,6 +30,7 @@ export async function runOp({ E, db, profile, op, args, telegram, copy, maxRetri
   if (!profile || !profile.active) return { status: 403, body: { error: 'الحساب ده موقوف' } };
   if (profile.role === 'pending') return { status: 403, body: { error: 'حسابك لسه مستني المالك يحدد صلاحياتك' } };
   if (!Array.isArray(args)) args = args == null ? [] : [args];
+  if (args.length > 4 || (!NO_ARG_OPS.has(op) && !POSITIONAL_OPS.has(op) && !(args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])))) return { status: 400, body: { error: 'بيانات العملية ناقصة أو غير صحيحة' } };
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const row = await db.load();
     E.setState(row.state);
@@ -56,6 +58,29 @@ export async function runOp({ E, db, profile, op, args, telegram, copy, maxRetri
     return { status: 200, body: { ok: true, version: v, result: result === undefined ? null : JSON.parse(JSON.stringify(result)) } };
   }
   return { status: 409, body: { error: 'السيستم مشغول بعمليات تانية، جرّب تاني' } };
+}
+
+/* Public «طلب حساب» form: nobody is logged in, so it is throttled. At most 3 requests an hour from one address,
+   8 in ten minutes and 30 a day from everyone. log = [{t: ms, ip: short hash}]; returns the log to store back. */
+export function requestGate(log, now, ip) {
+  const day = 24 * 3600e3, list = (Array.isArray(log) ? log : []).filter(x => x && typeof x.t === 'number' && now - x.t < day && x.t <= now).slice(-200);
+  const mine = list.filter(x => x.ip === ip && now - x.t < 3600e3).length, burst = list.filter(x => now - x.t < 600e3).length;
+  if (mine >= 3 || burst >= 8 || list.length >= 30) return { ok: false, log: list };
+  return { ok: true, log: [...list, { t: now, ip }] };
+}
+export function sameSecret(a, b) { // compare without leaking where the first difference is
+  a = String(a ?? ''); b = String(b ?? ''); if (!a || !b || a.length !== b.length) return false;
+  let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0;
+}
+
+/* The books as this account may see them: whole for cost roles, money taken out for everyone else (engine.redactFor).
+   Accounts that are stopped or still waiting for a role get nothing. */
+export async function runState({ E, db, profile }) {
+  if (!profile || !profile.active) return { status: 403, body: { error: 'الحساب ده موقوف' } };
+  if (profile.role === 'pending' || !E.ROLES[profile.role]) return { status: 403, body: { error: 'حسابك لسه مستني المالك يحدد صلاحياتك' } };
+  const row = await db.load();
+  const state = E.redactFor(row.state, { id: profile.user_id, role: profile.role, active: profile.active });
+  return { status: 200, body: { ok: true, version: row.version, state } };
 }
 
 /* WhatsApp bot endpoint (shared key checked by the caller): read-only catalog/status, and placing pending orders */
@@ -155,7 +180,8 @@ export async function runAdmin({ E, db, profile, op, args, auth }) {
     return syncUser({ E, db, profile, user: { id: a.id, username: p.username, name: p.name, role, active: true } });
   }
   if (op === 'tgLinkCode') {
-    const code = Array.from({ length: 10 }, () => 'abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random() * 31)]).join('');
+    const rb = new Uint8Array(10); crypto.getRandomValues(rb);
+    const code = Array.from(rb, x => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
     await auth.setSecret('tg_link_code', code); await auth.setSecret('tg_link_exp', String(Date.now() + 15 * 60 * 1000));
     return { status: 200, body: { ok: true, result: { code, bot: 'BoomMeat_bot' } } };
   }

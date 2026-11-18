@@ -7,6 +7,7 @@ const { esc, tx, fm, fm0, kgf, qtyf, pct, df, tf, packName, toG, toP, toI, canCo
 /* ========== WHATSAPP ORDERS (placed by the bot, approved here → invoice on account; collected on delivery) ========== */
 const OSTAT = { pending: ['warn', 'مستني موافقة'], approved: ['ok', 'متوافق عليه'], rejected: ['bad', 'مرفوض'] };
 const opack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
+const olw = l => (l.unit === 'pc' ? `${l.qty} قطعة` : `${kgf(l.qty)} كجم`); // a raw cut ordered by weight
 const ofee = o => o.fee != null ? o.fee : (o.delivery && o.delivery.fee) || 0; // new orders carry the fixed delivery fee
 const ogrand = o => o.total + ofee(o);
 const ostage = o => o.deliveredAt ? '<span class="pill ok">اتسلّم ✓</span>' : o.outAt ? '<span class="pill info">في الطريق 🚚</span>' : '';
@@ -18,7 +19,7 @@ PAGES.orders = () => {
   const card = o => `<a class="oc ${o.status}" href="#order/${esc(o.id)}">
       <div class="oc-a"><b class="mono">${esc(o.no)}</b>${o.test ? '<span class="pill mut">تجربة</span>' : ''}<small>${tf(o.at)}</small></div>
       <div class="oc-b"><b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<small class="mono">${esc(o.phone)}</small></div>
-      <div class="oc-c">${o.lines.map(l => `<span>${l.count} × ${esc(l.name)} <em>${opack(l.packSize)}</em></span>`).join('')}</div>
+      <div class="oc-c">${o.lines.map(l => `<span>${l.raw ? `${esc(l.name)} <em>${olw(l)}</em>` : `${l.count} × ${esc(l.name)} <em>${opack(l.packSize)}</em>`}</span>`).join('')}</div>
       <div class="oc-d"><b>${fm(ogrand(o))} ج</b><small>${E.ORDER_METHODS[o.method] || ''}${o.proof ? (o.proof.status === 'ok' ? ' · ✅ التحويل وصل' : o.proof.status === 'rejected' ? ' · ❌ التحويل موصلش' : ' · 📎 صورة تحويل مستنية') : ''}${o.card && o.card.status === 'paid' ? ' · 💳 الفيزا اتدفعت' : ''}</small></div>
       <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}${ostage(o)}</div>
       <span class="oc-go" aria-hidden="true">${ic('menu')}</span></a>`;
@@ -72,7 +73,7 @@ function receiptHTML(o, d) {
       ${dt ? `<div class="r"><span>التاريخ</span><b>${esc(dt)}</b></div>` : ''}
       <div class="r"><span>العميل</span><b>${esc(o.name)}</b></div>
       <hr>
-      ${o.lines.map(l => `<div class="it"><span>${esc(l.name)}<small>${l.count} × ${opack(l.packSize)} · ${fm0(l.pricePerKg)} ج للكيلو</small></span><b>${egp2(l.amount)}</b></div>`).join('')}
+      ${o.lines.map(l => `<div class="it"><span>${esc(l.name)}<small>${l.raw ? olw(l) : `${l.count} × ${opack(l.packSize)}`} · ${fm0(l.pricePerKg)} ج ${l.unit === 'pc' ? 'للقطعة' : 'للكيلو'}</small></span><b>${egp2(l.amount)}</b></div>`).join('')}
       ${fee ? `<div class="it"><span>التوصيل</span><b>${egp2(fee)}</b></div>` : ''}
       <hr>
       <div class="r"><span>الصافي</span><b>${egp2(net)}</b></div>
@@ -122,7 +123,7 @@ PAGES.order = id => {
       <div style="display:grid;gap:16px;align-content:start">
       <div class="card"><div class="hd"><h3>الطلب</h3><span class="sub">${tf(o.at)}</span></div><div class="bd">
         <div class="tw"><table class="t"><thead><tr><th>المنتج</th><th>العبوة</th><th class="n">العدد</th><th class="n">الكمية</th><th class="n">سعر الكيلو</th><th class="n">القيمة</th></tr></thead><tbody>
-          ${o.lines.map(l => `<tr><td class="nm"><b>${esc(l.name)}</b></td><td>${opack(l.packSize)}</td><td class="n">${l.count}</td><td class="n">${kgf(l.qty)} كجم</td><td class="n">${fm(l.pricePerKg)}</td><td class="n"><b>${fm(l.amount)}</b></td></tr>`).join('')}
+          ${o.lines.map(l => `<tr><td class="nm"><b>${esc(l.name)}</b></td><td>${l.raw ? 'بالوزن' : opack(l.packSize)}</td><td class="n">${l.raw ? '—' : l.count}</td><td class="n">${l.raw && l.unit === 'pc' ? l.qty + ' قطعة' : kgf(l.qty) + ' كجم'}</td><td class="n">${fm(l.pricePerKg)}</td><td class="n"><b>${fm(l.amount)}</b></td></tr>`).join('')}
           ${ofee(o) ? `<tr><td class="nm">التوصيل</td><td></td><td></td><td></td><td></td><td class="n">${fm(ofee(o))}</td></tr>` : ''}
           <tr class="tot"><td colspan="5">الإجمالي${ofee(o) ? ' والتوصيل' : ''}</td><td class="n">${fm(ogrand(o))}</td></tr></tbody></table></div>
         ${o.note ? `<div class="note" style="margin-top:12px"><b>ملاحظة العميل:</b> ${esc(o.note)}</div>` : ''}
@@ -165,7 +166,7 @@ ACTS['ord-proof-ok'] = id => modal('التحويل وصل؟', `<p>اتأكدت �
 
 
 const ordOf = id => (S().docs.orders || []).find(o => o.id === id);
-ACTS['ord-ok'] = id => { const o = ordOf(id); modal(`موافقة على ${esc(o.no)}`, `<p>هتتعمل فاتورة <b>آجل</b> بـ <b>${fm(o.total)}</b> على <b>${esc(o.name)}</b>، وهيتخصم من الفريزر:</p><p>${o.lines.map(l => `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>')}</p><p>الدفع عند التسليم: ${E.ORDER_METHODS[o.method]}.</p>`, { saveText: 'وافق واعمل الفاتورة', save: async () => { await E.decideOrder({ id, action: 'approve' }); U.afterChange(); toast('اتوافق على الطلب واتعملت الفاتورة', 'ok'); } }); };
+ACTS['ord-ok'] = id => { const o = ordOf(id); modal(`موافقة على ${esc(o.no)}`, `<p>هتتعمل فاتورة <b>آجل</b> بـ <b>${fm(o.total)}</b> على <b>${esc(o.name)}</b>، وهيتخصم من الفريزر:</p><p>${o.lines.map(l => l.raw ? `${esc(l.name)} ${olw(l)}` : `${l.count} × ${esc(l.name)} ${opack(l.packSize)}`).join('<br>')}</p><p>الدفع عند التسليم: ${E.ORDER_METHODS[o.method]}.</p>`, { saveText: 'وافق واعمل الفاتورة', save: async () => { await E.decideOrder({ id, action: 'approve' }); U.afterChange(); toast('اتوافق على الطلب واتعملت الفاتورة', 'ok'); } }); };
 ACTS['ord-no'] = id => { const o = ordOf(id); modal(`رفض ${esc(o.no)}`, `<p class="crumb">البوت هيبلغ العميل على الواتساب بلطف إن الطلب مش هيكمل.</p><label class="fld"><span>السبب (اختياري)</span><input class="f" id="ord-reason" maxlength="200" placeholder="مثلاً: العنوان برا منطقة التوصيل"></label>`, { saveText: 'ارفض الطلب', save: async () => { await E.decideOrder({ id, action: 'reject', reason: val('ord-reason') }); U.afterChange(); toast('اترفض الطلب', 'ok'); } }); };
 ACTS['ord-paid'] = id => { const o = ordOf(id); const insta = o.method === 'instapay';
   modal(insta ? `التحويل وصل · ${esc(o.no)}` : `تحصيل ${esc(o.no)}`, `<p>${insta ? 'اتأكدت إن التحويل وصل حسابك؟' : 'الفلوس اتحصّلت من العميل؟'} هيتسجل تحصيل <b>${fm(ogrand(o) - (o.paidAmount || 0))} ج</b> من <b>${esc(o.name)}</b> (${E.ORDER_METHODS[o.method]})${o.status === 'pending' ? '، والطلب هيتوافق عليه وتتعمل فاتورته' : ''}.</p><p class="crumb">العميل هيجيله على الواتساب «تم دفع الأوردر» وفاتورته.</p>`,
@@ -222,10 +223,11 @@ PAGES.newinvoice = () => {
       ${sizes.length ? `<div class="pc-z">${sizes.map(z => { const n = inCart(p.id, z), left = fgAvail(p.id, z) - n; return `<button class="pz ${n ? 'on' : ''}" data-act="ni-plus" data-arg="${p.id}|${z}" ${left > 0 ? '' : 'disabled'} aria-label="ضيف ${esc(p.name)} ${packName(z)}"><b>${packName(z)}</b><small>${n ? `${n} في السلة` : `متاح ${left}`}</small></button>`; }).join('')}</div>`
         : `<div class="pc-out">مفيش رصيد في الفريزرات. بيتملا لما تتقفل تشغيلة للمنتج ده.</div>`}</div>`;
   };
-  const sorted = NI.grp === '__stock' ? [] : shown.slice().sort((a, b) => (E.available(b.id, E.whs('fg')) > 0) - (E.available(a.id, E.whs('fg')) > 0));
+  const sorted = NI.grp === '__stock' || NI.grp === '__raw' ? [] : shown.slice().sort((a, b) => (E.available(b.id, E.whs('fg')) > 0) - (E.available(a.id, E.whs('fg')) > 0));
   // any stock item sells as it is too (raw cuts, صرة، عضم، توابل… by weight; packaging by piece): its own tab, or when searching
   const stockAv = it => E.available(it.id, E.sellStores(it));
-  const rawShown = (NI.grp === '__stock' || q) ? s.items.filter(i => E.rawSellable(i) && i.active !== false && stockAv(i) > 0 && (!q || i.name.includes(q) || (i.code || '').toLowerCase().includes(q.toLowerCase()))) : [];
+  const isCut = i => ['meat', 'carcass', 'byproduct'].includes(i.cat) && i.priceRetail > 100; // raw cuts with a sale price, e.g. صره
+  const rawShown = (NI.grp === '__stock' || NI.grp === '__raw' || !NI.grp || q) ? s.items.filter(i => E.rawSellable(i) && i.active !== false && stockAv(i) > 0 && (NI.grp === '__stock' || q || isCut(i)) && (!q || i.name.includes(q) || (i.code || '').toLowerCase().includes(q.toLowerCase()))) : [];
   const unitTxt = it => (it.unit === 'kg' ? 'للكيلو' : 'للقطعة');
   const rawCard = it => { const n = NI.lines.find(l => l.productId === it.id); return `<div class="pc"><div class="pc-h"><b>${esc(it.name)}</b><span>${E.priceFor(it, c) ? fm0(E.priceFor(it, c)) + ' ج ' + unitTxt(it) : 'السعر في السلة'}</span></div>${U.costSale(it, E.priceFor(it, c), { short: true })}
     <div class="pc-z"><button class="pz ${n ? 'on' : ''}" data-act="ni-raw" data-arg="${it.id}"><b>${it.unit === 'kg' ? 'بالوزن' : 'بالعدد'}</b><small>${n ? 'في السلة' : `متاح ${qtyf(stockAv(it), it.unit)}`}</small></button></div></div>`; };
@@ -257,8 +259,8 @@ PAGES.newinvoice = () => {
   page('بيع جديد', `<div class="pos">
     <section class="pos-cat card"><div class="bd">
       <div class="pos-tools"><input class="f" id="ni-q" type="search" placeholder="ابحث باسم المنتج" value="${esc(NI.q)}" aria-label="ابحث باسم المنتج">
-        <div class="seg pos-g"><button class="${NI.grp ? '' : 'on'}" data-act="ni-grp" data-arg="">الكل</button>${groups.map(g => `<button class="${NI.grp === g ? 'on' : ''}" data-act="ni-grp" data-arg="${esc(g)}">${esc(g)}</button>`).join('')}<button class="${NI.grp === '__stock' ? 'on' : ''}" data-act="ni-grp" data-arg="__stock">من المخزن (أي صنف)</button></div></div>
-      <div class="pcs">${sorted.map(card).join('')}${rawShown.map(rawCard).join('')}${sorted.length || rawShown.length ? '' : `<div class="empty">${NI.grp === '__stock' ? 'مفيش أصناف في المخزن' : 'مفيش منتج بالاسم ده'}</div>`}</div>
+        <div class="seg pos-g"><button class="${NI.grp ? '' : 'on'}" data-act="ni-grp" data-arg="">الكل</button>${groups.map(g => `<button class="${NI.grp === g ? 'on' : ''}" data-act="ni-grp" data-arg="${esc(g)}">${esc(g)}</button>`).join('')}<button class="${NI.grp === '__raw' ? 'on' : ''}" data-act="ni-grp" data-arg="__raw">قطعيات خام (بالوزن)</button><button class="${NI.grp === '__stock' ? 'on' : ''}" data-act="ni-grp" data-arg="__stock">من المخزن (أي صنف)</button></div></div>
+      <div class="pcs">${sorted.map(card).join('')}${rawShown.map(rawCard).join('')}${sorted.length || rawShown.length ? '' : `<div class="empty">${NI.grp === '__stock' || NI.grp === '__raw' ? 'مفيش أصناف في المخزن' : 'مفيش منتج بالاسم ده'}</div>`}</div>
     </div></section>
     <aside class="pos-cart card" id="cart"><div class="bd">
       <div class="hd" style="padding:0 0 10px"><h3>السلة</h3><span class="sub">${count ? count + ' عبوة' : 'فاضية'}</span>${count ? '<div class="tools"><button class="btn sm" data-act="ni-reset">فضّي السلة</button></div>' : ''}</div>
@@ -411,7 +413,7 @@ ACTS['cp-edit'] = id => {
   modal('قايمة أسعار ' + esc(p.name), `<div class="note info">الأسعار دي بتتحط لوحدها في أي فاتورة للعميل ده${(p.branches || []).length ? ' ولكل فروعه' : ''}، ومع كده تقدر تغيّر السعر وقت البيع.</div>
     <div class="fgrid"><label class="fld"><span>صنف</span><input class="f" id="cp-q" list="cp-l" placeholder="اكتب اسم الصنف"><datalist id="cp-l">${all.map(i => `<option value="${esc(i.name)}">`).join('')}</datalist></label><label class="fld"><span>السعر (ج ${''}للكيلو أو القطعة)</span><input class="f" id="cp-n" type="number" min="0" step="0.5"></label><div class="fld"><span>&nbsp;</span><button class="btn" type="button" id="cp-add">${ic('plus')} ضيف</button></div></div>
     <div id="cp-rows"></div>`,
-  { wide: true, saveText: 'حفظ الأسعار', save: async () => { read(); await E.setCustomerPrices({ customerId: id, prices: Object.fromEntries(Object.entries(pr).filter(([, v]) => v > 0)) }); toast('اتحفظت قايمة الأسعار', 'ok'); } });
+  { wide: true, saveText: 'حفظ الأسعار', save: async () => { read(); U.priceCheck(Object.entries(pr).filter(([, v]) => v > 0).map(([iid, v]) => { const x = E.item(iid); return { name: x.name, price: v, refs: [E.itemCost(iid).v, x.priceRetail] }; })); await E.setCustomerPrices({ customerId: id, prices: Object.fromEntries(Object.entries(pr).filter(([, v]) => v > 0)) }); toast('اتحفظت قايمة الأسعار', 'ok'); } });
   draw();
   document.getElementById('cp-add').onclick = () => { read(); const it = all.find(i => i.name === val('cp-q').trim()); const v = toP(val('cp-n')); if (!it) { toast('اختار صنف من القايمة', 'bad'); return; } if (!(v > 0)) { toast('اكتب السعر', 'bad'); return; } pr[it.id] = v; document.getElementById('cp-q').value = ''; document.getElementById('cp-n').value = ''; draw(); };
 };
@@ -494,13 +496,17 @@ ACTS['item-edit'] = id => {
     <label class="fld"><span>النوع</span><select class="f" id="ie-t" ${used ? 'disabled' : ''}>${Object.entries(E.CAT_NAME).map(([k, n]) => `<option value="${k}" ${it.cat === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label class="fld"><span>القسم (للمنتجات)</span><select class="f" id="ie-g">${['مصنعات', 'قطعيات', 'قطعيات مميزة', 'مقبلات', 'لحوم باردة'].map(g => `<option ${it.group === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
     ${it.cat === 'product' || !id ? `<div class="fld"><span>العبوات المتاحة (للمنتجات)</span><div class="pk-opts">${[...new Set([...E.PACK_SIZES, ...(it.packs || [])])].sort((a, b) => a - b).map(z => `<label><input type="checkbox" class="ie-pk" value="${z}" ${(it.packs || E.PACK_SIZES).includes(z) ? 'checked' : ''}> ${packName(z)}</label>`).join('')}</div></div>` : ''}
-    <label class="fld"><span>تكلفة ثابتة للكيلو في الجزارة (ج) — اختياري</span><input class="f" id="ie-fc" type="number" min="0" step="0.5" value="${it.fixedCost != null ? it.fixedCost / 100 : ''}" placeholder="مثلًا مفاريم 350، غضاريف 35، بوش 150، عضم 0"></label>
+    <label class="fld"><span>رقم ثابت للكيلو: التكلفة وسعر البيع (ج) — اختياري</span><input class="f" id="ie-fc" type="number" min="0" step="0.5" value="${it.fixedCost != null ? it.fixedCost / 100 : ''}" placeholder="مثلًا مفاريم 350، غضاريف 35، بوش 150، عضم 0"><small class="crumb">لو اتكتب، الصنف ده بيتحسب وبيتباع بالرقم ده بس (من غير قطاعي وجملة)</small></label>
     <label class="fld"><span>القسم في شاشة العامل (للحوم)</span><input class="f" id="ie-s" list="ie-sl" value="${esc(it.sub || '')}" placeholder="بلدي فريش، برازيلي، دهون…"><datalist id="ie-sl">${[...new Set([...E.MEAT_SECTIONS, ...S().items.map(i => i.sub).filter(Boolean)])].map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
     <label class="fld"><span>الوحدة</span><select class="f" id="ie-u" ${used ? 'disabled' : ''}><option value="kg" ${it.unit === 'kg' ? 'selected' : ''}>كجم</option><option value="pc" ${it.unit === 'pc' ? 'selected' : ''}>قطعة</option></select></label>
     <label class="fld"><span>سعر القطاعي للكيلو (ج)</span><input class="f" id="ie-r" type="number" min="0" step="0.01" value="${it.priceRetail / 100}"></label><label class="fld"><span>سعر الجملة للكيلو (ج)</span><input class="f" id="ie-w" type="number" min="0" step="0.01" value="${it.priceWholesale / 100}"></label>
-    <label class="fld"><span>الحد الأدنى (${it.unit === 'kg' ? 'كجم' : 'قطعة'})</span><input class="f" id="ie-m" type="number" min="0" step="1" value="${it.unit === 'kg' ? it.minQty / 1000 : it.minQty}"></label>${!id ? `<label class="fld"><span>لو كيس: لعبوة وزنها (جرام)</span><input class="f" id="ie-pf" type="number" min="50" max="20000" step="10" placeholder="مثلًا 200"></label>` : it.packFor ? `<label class="fld"><span>كيس لعبوة</span><input class="f" value="${it.packFor} جرام" disabled></label>` : ''}</div>
+    <label class="fld"><span>الحد الأدنى (${it.unit === 'kg' ? 'كجم' : 'قطعة'})</span><input class="f" id="ie-m" type="number" min="0" step="1" value="${it.unit === 'kg' ? it.minQty / 1000 : it.minQty}"></label>${!id || it.cat === 'pack' ? `<label class="fld"><span>كيس لعبوة (لمواد التعبئة)</span><select class="f" id="ie-pf"><option value="">مش كيس عبوة</option>${[...new Set([...E.PACK_SIZES, ...(it.packFor ? [it.packFor] : [])])].sort((x, y) => x - y).map(z => { const cur = S().items.find(x => x.packFor === z && x.id !== id); return `<option value="${z}" ${it.packFor === z ? 'selected' : ''}>${packName(z)}${cur ? ` (بدل ${esc(cur.name)})` : ''}</option>`; }).join('')}</select></label><label class="fld"><span>استيكر العبوات</span><select class="f" id="ie-st"><option value="">لأ</option><option value="1" ${it.sticker ? 'selected' : ''}>أيوه، ده الاستيكر اللي بيتلزق على كل عبوة</option></select></label>` : ''}</div>
     ${used ? '<div class="crumb">النوع والوحدة مقفولين لأن الصنف عليه حركات.</div>' : ''}<div class="crumb">سعر القطاعي للقطعيات بيستخدم كمان في توزيع تكلفة التقطيع.</div>`,
-  { save: async () => { const unit = val('ie-u'); await E.saveItem({ id, name: val('ie-n'), group: val('ie-g'), cat: val('ie-t'), unit, priceRetail: toP(val('ie-r')) || 0, priceWholesale: toP(val('ie-w')) || 0, minQty: unit === 'kg' ? toG(val('ie-m')) || 0 : toI(val('ie-m')) || 0, vat: 0, sub: val('ie-s'), fixedCost: val('ie-fc') === '' ? null : toP(val('ie-fc')), ...(val('ie-t') === 'product' ? { packs: [...document.querySelectorAll('.ie-pk:checked')].map(x => +x.value) } : {}), ...(!id && toI(val('ie-pf')) ? { packFor: toI(val('ie-pf')) } : {}) }); toast('اتحفظ', 'ok'); } });
+  { save: async () => { const unit = val('ie-u'), r_ = toP(val('ie-r')) || 0, w_ = toP(val('ie-w')) || 0, c_ = id ? E.itemCost(id).v : 0, nm_ = val('ie-n');
+    if (val('ie-t') !== 'pack' && val('ie-fc') === '') U.priceCheck([{ name: nm_ + ' قطاعي', price: r_, refs: [c_, w_ < r_ * 3 && w_ * 3 > r_ ? w_ : 0] }, { name: nm_ + ' جملة', price: w_, refs: [c_, r_] }]);
+    await E.saveItem({ id, name: val('ie-n'), group: val('ie-g'), cat: val('ie-t'), unit, priceRetail: toP(val('ie-r')) || 0, priceWholesale: toP(val('ie-w')) || 0, minQty: unit === 'kg' ? toG(val('ie-m')) || 0 : toI(val('ie-m')) || 0, vat: 0, sub: val('ie-s'), fixedCost: val('ie-fc') === '' ? null : toP(val('ie-fc')), ...(val('ie-t') === 'product' ? { packs: [...document.querySelectorAll('.ie-pk:checked')].map(x => +x.value) } : {}), ...(val('ie-t') === 'pack' && document.getElementById('ie-pf') ? { packFor: toI(val('ie-pf')) || 0, sticker: val('ie-st') === '1' } : {}) }); toast('اتحفظ', 'ok'); } });
+  const fc = document.getElementById('ie-fc'), lock = () => { const on = fc.value !== ''; for (const k of ['ie-r', 'ie-w']) { const el = document.getElementById(k); el.disabled = on; if (on) el.value = fc.value; } };
+  fc.oninput = lock; lock();
 };
 
 /* ========== TREASURY ========== */
@@ -735,7 +741,7 @@ ACTS['usr-edit'] = id => { const u = S().users.find(x => x.id === id); modal('ت
 ACTS['usr-pw'] = id => { const u = S().users.find(x => x.id === id); modal('باسورد جديد لـ ' + esc(u.name), `<label class="fld"><span>الباسورد الجديد</span><input class="f" id="up-p" dir="ltr" value="${genPw()}"></label><div class="note">انسخ الباسورد وادّيه للموظف قبل ما تحفظ.</div>`,
   { save: async () => { await U.api('resetPassword', { id, password: val('up-p') }); toast('اتغير الباسورد', 'ok'); } }); };
 function genPw() { const c = 'abcdefghjkmnpqrstuvwxyz23456789'; let p = ''; const a = new Uint32Array(10); crypto.getRandomValues(a); a.forEach(x => { p += c[x % c.length]; }); return p.slice(0, 4) + '-' + p.slice(4, 8) + p.slice(8); }
-async function reloadLive() { const { data } = await U.sb().from('erp_state').select('version,state').eq('id', 1).single(); E.setState(data.state); E.S.currentUser = U.profile().user_id; }
+async function reloadLive() { await U.loadState(); }
 /* ========== EDIT REQUESTS (owner decides; Telegram has the same buttons) ========== */
 PAGES.requests = () => {
   const s = S(), tb = tabs('rq', [['pending', 'مستنية موافقة'], ['done', 'اتعامل معاها']], 'pending');

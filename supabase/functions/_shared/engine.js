@@ -171,6 +171,8 @@ const warehouses = () => (S && S.warehouses) || WAREHOUSES;
 const whName = id => (warehouses().find(w => w.id === id) || {}).name || id;
 const whUse = id => (warehouses().find(w => w.id === id) || {}).use;
 const whs = use => warehouses().filter(w => w.use === use).map(w => w.id);
+const packStores = () => [...whs('pack'), ...whs('receiving')]; // bags bought straight into receiving are usable too
+const rawStores = () => [...whs('raw'), ...whs('receiving')]; // production fridge first, then what is still in receiving
 function migratePacks(st) { // Nov 2026, once: products sell 200 g / 250 g / ½ / 1 kg; bags for 200 g & 250 g and the rework item exist
   if (!st.items || (st.migr && st.migr.packs2026)) return;
   st.migr = { ...(st.migr || {}), packs2026: true };
@@ -386,6 +388,13 @@ const butById = id => { const r = butcheries().find(x => x.id === id); need(r, '
 const butIn = r => r.inputs.reduce((s, i) => s + i.qty, 0);
 const butOut = r => r.outputs.reduce((s, o) => s + o.qty, 0);
 const butCost = r => r.inputs.reduce((s, i) => s + i.value, 0) + r.packs.reduce((s, p) => s + p.value, 0);
+function butSale(r) { // what the run's cuts would sell for at the retail price; miss = lines with no price and no fixed cost
+  let v = 0, miss = 0;
+  for (const o of r.outputs) { const it = item(o.itemId), p = it.priceRetail || 0; if (it.waste) continue;
+    if (!p) { if (it.fixedCost == null) miss++; continue; }
+    v += it.unit === 'pc' ? p * (o.count || 0) : mulDiv(p, o.qty, 1000); }
+  return { v, miss };
+}
 function takeCarcass(r, lotId, qty, date) {
   const l = S.lots.find(x => x.id === lotId); need(l && l.qty > 0, 'الدفعة غير موجودة');
   const src = item(l.itemId); need(['carcass', 'meat', 'byproduct'].includes(src.cat), 'تشغيلة الجزارة بتاخد لحمة خام (عجل، صرة بالعضم، قطعيات…)'); // open to any raw meat (Nov 2026)
@@ -420,7 +429,7 @@ function butcheryPack({ id, itemId, qty, date }) { // bags/trays used in the run
     const r = butById(id); need(r.status === 'open', 'التشغيلة مقفولة');
     const it = item(itemId); need(it.cat === 'pack', 'اختار كيس أو مادة تعبئة');
     need(isInt(qty) && qty > 0, 'العدد غير صحيح');
-    const parts = consume(it.id, qty, whs('pack'));
+    const parts = consume(it.id, qty, packStores());
     const value = parts.reduce((s, p) => s + p.value, 0);
     const je = post({ date, type: 'butchery', ref: { type: 'butchery', id: r.id, no: r.no }, memo: `صرف ${it.name} على تشغيلة الجزارة ${r.no}`, lines: [{ acc: '1304', dr: value }, { acc: CAT_ACC.pack, cr: value }] });
     r.packs.push({ id: uid('BP'), itemId: it.id, qty, value, parts, je: je.no, at: stamp(date), by: S.currentUser });
@@ -648,7 +657,7 @@ function issuedOf(b, itemId) { return b.issues.filter(i => !i.reversed && i.item
 function _issue(b, itemId, qty, date, note) {
   const it = item(itemId);
   need(['meat', 'spice', 'pack', 'byproduct'].includes(it.cat), `"${it.name}" مش بيتصرف على تشغيلة`);
-  const parts = consume(itemId, qty, it.cat === 'pack' ? whs('pack') : whs('raw'));
+  const parts = consume(itemId, qty, it.cat === 'pack' ? packStores() : rawStores());
   const value = parts.reduce((s, p) => s + p.value, 0);
   const ln = { id: uid('I'), itemId, qty, value, parts, by: S.currentUser, at: stamp(date), reversed: false, note: note || '' };
   b.issues.push(ln);
@@ -675,6 +684,7 @@ function issue({ batchId, itemId, qty, date }) {
 }
 function requestCorrection({ batchId, issueId, newQty, reason }) {
   return tx(() => {
+    perm('worker', 'supervisor', 'packer'); // the people who issue on batches
     const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة، التصحيح مش متاح');
     const ln = b.issues.find(i => i.id === issueId); need(ln && !ln.reversed, 'السطر غير موجود');
     need(isInt(newQty) && newQty >= 0 && newQty !== ln.qty, 'اكتب الكمية الصحيحة');
@@ -743,10 +753,10 @@ function returnRework({ batchId, qty, date }) { // dough left in the machine goe
     return lot;
   });
 }
-function bagItemFor(size) { const it = S.items.find(i => i.cat === 'pack' && i.packFor === size); need(it, 'مفيش كيس معرّف للعبوة ' + size / 1000 + ' كجم'); return it; }
-function stickerItem() { const it = S.items.find(i => i.cat === 'pack' && i.sticker); need(it, 'مفيش استيكر معرّف'); return it; }
+const bagItemFor = size => S.items.find(i => i.cat === 'pack' && i.active !== false && i.packFor === size) || null; // the bag linked to a pack size (the owner can link any bag)
+const stickerItem = () => S.items.find(i => i.cat === 'pack' && i.active !== false && i.sticker) || null;
 
-function closeBatch({ batchId, date, packs, split }) {
+function closeBatch({ batchId, date, packs, split, bags, sticker }) { // bags: {size: itemId | ''} and sticker: itemId | '' pick what was really used ('' = none)
   return tx(() => {
     perm('supervisor'); checkDate(date);
     const b = batchById(batchId); need(running(b), 'التشغيلة مقفولة بالفعل');
@@ -762,8 +772,15 @@ function closeBatch({ batchId, date, packs, split }) {
     need(!S.docs.corrections.some(c => c.batchId === b.id && c.status === 'pending'), 'فيه طلب تصحيح مستني موافقة على التشغيلة دي');
     // packaging: one bag per standard pack (unless the packing worker already issued that bag) + one sticker per pack; open-weight trays are issued by hand
     const sizes = Object.keys(packs).map(Number).sort((a, c) => a - c);
-    for (const s of sizes) if (PACK_SIZES.includes(s) || OLD_BAG(s)) { const bag = bagItemFor(s); if (!issuedOf(b, bag.id)) _issue(b, bag.id, packs[s], date, 'تعبئة تلقائية'); }
-    if (!issuedOf(b, stickerItem().id)) _issue(b, stickerItem().id, count, date, 'تعبئة تلقائية');
+    // a picked item is issued (and refused if short); with no pick, the linked item is issued only when there is enough of it, otherwise the batch closes without it
+    const pick = (chosen, linked, n) => { if (chosen !== undefined) { if (!chosen) return null; const it = item(chosen); need(it.cat === 'pack', `"${it.name}" مش مادة تعبئة`); return it; }
+      return linked && (issuedOf(b, linked.id) || available(linked.id, packStores()) >= n) ? linked : null; }; // already issued by the packer counts
+    const noPack = [];
+    for (const s of sizes) { if (!(PACK_SIZES.includes(s) || OLD_BAG(s) || (bags && bags[s] !== undefined))) continue;
+      const bag = pick(bags ? bags[s] : undefined, bagItemFor(s), packs[s]); if (!bag) { noPack.push(`كيس ${s / 1000} كجم`); continue; }
+      if (!issuedOf(b, bag.id)) _issue(b, bag.id, packs[s], date, 'تعبئة تلقائية'); }
+    const stk = pick(sticker, stickerItem(), count); if (stk) { if (!issuedOf(b, stk.id)) _issue(b, stk.id, count, date, 'تعبئة تلقائية'); } else noPack.push('استيكر');
+    b.noPack = noPack.length ? noPack : undefined;
     const cost = batchCostNow(b);
     const vals = alloc(cost, sizes.map(s => packs[s] * s));
     // where the packs go: one freezer by default, or split across finished-goods freezers
@@ -787,6 +804,7 @@ const OLD_BAG = s => !!S.items.find(i => i.cat === 'pack' && i.packFor === s); /
 
 /* the owner reopens or cancels a closed production batch (same rules as butchery): only while its finished packs are untouched */
 function _unclose(b, why) {
+  delete b.noPack;
   const lots = S.lots.filter(l => l.batchId === b.id && l.src && l.src.type === 'batch' && l.src.id === b.id && !l.cancelled); // lots from an earlier close that was reopened are already gone
   for (const l of lots) need(l.qty === l.inQty && l.value === l.inValue, `العبوات «${item(l.itemId).name} ${l.packSize} جم» (${l.code}) ${lotUsage(l)}. مينفعش التشغيلة ${why} غير لما ترجّع ده الأول (مرتجع أو تصحيح)`);
   const val = lots.reduce((a, l) => a + l.value, 0);
@@ -839,7 +857,7 @@ function priceFor(p, cust) { // a customer's own price list wins (e.g. Healthy);
   return cust && cust.kind === 'wholesale' ? (p.priceWholesale || p.priceRetail) : p.priceRetail;
 }
 const SELL_RAW = ['meat', 'carcass', 'byproduct', 'spice', 'pack']; // ANY stock item can be sold as it is (owner, Nov 2026): by weight, or by piece for packaging
-const sellStores = it => (it.cat === 'pack' ? whs('pack') : [...whs('raw'), ...whs('receiving')]);
+const sellStores = it => (it.cat === 'pack' ? packStores() : [...whs('raw'), ...whs('receiving')]);
 const rawSellable = it => SELL_RAW.includes(it.cat) && !it.waste && !it.rework;
 function setCustomerPrices({ customerId, prices }) {
   return tx(() => {
@@ -1106,7 +1124,11 @@ const PREPAID = m => m === 'instapay' || m === 'card'; // money must arrive befo
 function normPhone(s) { let d = String(s || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); if (d.startsWith('20') && d.length === 12) d = '0' + d.slice(2); return d; }
 function customerByPhone(phone) { const n = normPhone(phone); return n.length >= 8 ? S.partners.find(p => p.type === 'customer' && normPhone(p.phone) === n) || null : null; }
 function orders() { return S.docs.orders || (S.docs.orders = []); }
-function reservedQty(productId, packSize) { return orders().filter(o => o.status === 'pending').reduce((s, o) => s + o.lines.filter(l => l.productId === productId && l.packSize === packSize).reduce((a, l) => a + l.qty, 0), 0); }
+const HOLD_DAYS = 2, MAX_PENDING_ORDERS = 60; // a pending WhatsApp order holds stock for two days only, and the queue is capped, so fake orders cannot empty the catalog
+function reservedQty(productId, packSize) { const since = addDays(today(), -HOLD_DAYS); return orders().filter(o => o.status === 'pending' && o.date >= since).reduce((s, o) => s + o.lines.filter(l => l.productId === productId && l.packSize === packSize).reduce((a, l) => a + l.qty, 0), 0); }
+const BOT_RAW = ['meat', 'carcass', 'byproduct'];
+const botRaw = it => BOT_RAW.includes(it.cat) && rawSellable(it) && it.active !== false;
+function orderableRaw(itemId) { return Math.max(0, available(itemId, sellStores(item(itemId))) - reservedQty(itemId, 1)); }
 function orderable(productId, packSize) { return Math.max(0, available(productId, whs('fg'), packSize) - reservedQty(productId, packSize)); }
 const egpOf = p => p / 100;
 const deliveryFeeNow = () => (isInt(S.settings.deliveryFee) && S.settings.deliveryFee >= 0 ? S.settings.deliveryFee : 10000); // fixed delivery, piasters
@@ -1118,6 +1140,11 @@ function catalog(phone) { // read-only view for the bot: prices in EGP per kg, s
     products: S.items.filter(i => i.cat === 'product' && i.active !== false).map(i => ({
       id: i.id, code: i.code, name: i.name, group: i.group || '', pricePerKg: egpOf(priceFor(i, c || { kind })), retailPerKg: egpOf(i.priceRetail), wholesalePerKg: egpOf(i.priceWholesale),
       packs: packsOf(i).map(size => ({ size, price: egpOf(mulDiv(size, priceFor(i, c || { kind }), 1000)), inStock: Math.floor(orderable(i.id, size) / size) })),
+    })),
+    // raw cuts sold by weight (e.g. صره): order with { productId, grams } (or pieces for per-piece items)
+    raw: S.items.filter(i => botRaw(i) && priceFor(i, c || { kind }) > 100).map(i => ({
+      id: i.id, code: i.code, name: i.name, unit: i.unit, pricePerKg: egpOf(priceFor(i, c || { kind })), retailPerKg: egpOf(i.priceRetail), wholesalePerKg: egpOf(i.priceWholesale),
+      stock: i.unit === 'kg' ? orderableRaw(i.id) / 1000 : orderableRaw(i.id), minGrams: i.unit === 'kg' ? 250 : null,
     })),
   };
 }
@@ -1134,10 +1161,17 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
     need(address && String(address).trim().length >= 5 && String(address).trim().length <= 300, 'اكتب العنوان بالتفصيل');
     need(ORDER_METHODS[method], 'اختار الدفع: كاش أو إنستاباي أو فيزا');
     need(orders().filter(o => o.phone === ph && o.status === 'pending').length < 3, 'عندك ٣ طلبات لسه مستنية تأكيد');
+    need(orders().filter(o => o.status === 'pending').length < MAX_PENDING_ORDERS, 'عندنا طلبات كتير مستنية دلوقتي. جرّب بعد شوية أو كلمنا على التليفون');
     need(Array.isArray(lines) && lines.length && lines.length <= 30, 'الطلب فاضي');
     const merged = new Map();
     for (const ln of lines) {
-      const p = item(ln.productId); need(p.cat === 'product' && p.active !== false, 'صنف غير متاح');
+      const p = item(ln.productId);
+      if (p.cat !== 'product') { // a raw cut by weight: grams (kg items) or pieces
+        need(botRaw(p), 'صنف غير متاح'); const g = ln.grams != null ? ln.grams : ln.count;
+        need(isInt(g) && g > 0 && (p.unit !== 'kg' || (g >= 250 && g <= 200000)) && (p.unit === 'kg' || g <= 200), p.unit === 'kg' ? `وزن "${p.name}" لازم يكون من ربع كيلو لـ ٢٠٠ كيلو` : 'عدد غير صحيح');
+        const k = p.id + ':1'; merged.set(k, { productId: p.id, packSize: 1, raw: true, count: (merged.get(k) || { count: 0 }).count + g }); continue;
+      }
+      need(p.cat === 'product' && p.active !== false, 'صنف غير متاح');
       need(packsOf(p).includes(ln.packSize), `عبوة ${ln.packSize} جم مش متاحة لـ ${p.name}`);
       need(isInt(ln.count) && ln.count > 0 && ln.count <= 200, 'عدد غير صحيح');
       const k = p.id + ':' + ln.packSize; merged.set(k, { productId: p.id, packSize: ln.packSize, count: (merged.get(k) || { count: 0 }).count + ln.count });
@@ -1146,6 +1180,11 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
     const o = { id: uid('OR'), no: test ? nextNo('TST') : nextNo('ORD'), channel: 'whatsapp', status: 'pending', test: !!test, date: today(), at: stamp(today()),
       phone: ph, name: String(name).trim(), address: String(address).trim(), method, note: String(note || '').slice(0, 300), kind, customerId: c ? c.id : null, lines: [], total: 0, fee: deliveryFeeNow() };
     for (const ln of merged.values()) {
+      if (ln.raw) { const p = item(ln.productId), left = orderableRaw(p.id), pricePerKg = priceFor(p, c || { kind });
+        need(pricePerKg > 100, `${p.name} ملوش سعر بيع`);
+        need(left >= ln.count, `${p.name}: المتاح ${p.unit === 'kg' ? fmtQty(left, 'kg') : left} بس`);
+        const amount = mulDiv(ln.count, pricePerKg, unitBase(p.unit));
+        o.lines.push({ productId: p.id, name: p.name, raw: true, unit: p.unit, packSize: 1, count: ln.count, qty: ln.count, pricePerKg, amount }); o.total += amount; continue; }
       const p = item(ln.productId), qty = ln.count * ln.packSize, left = orderable(p.id, ln.packSize);
       need(left >= qty, `${p.name} عبوة ${ln.packSize} جم: المتاح ${Math.floor(left / ln.packSize)} بس`);
       const pricePerKg = priceFor(p, c || { kind }), amount = mulDiv(qty, pricePerKg, 1000);
@@ -1155,10 +1194,10 @@ function placeOrder({ phone, name, address, method, lines, note, test, expectTot
     olog(o, 'placed', `${o.lines.length} صنف · ${money(orderGrand(o))} شامل التوصيل · ${ORDER_METHODS[method]}`);
     orders().push(o);
     const pack = g => g >= 1000 ? `${g / 1000} كجم` : `${g} جم`;
-    alert('info', 'order', `🛒 طلب واتساب ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${ph}\n${o.address}\n${o.lines.map(l => `• ${l.count} × ${l.name} ${pack(l.packSize)} = ${money(l.amount)}`).join('\n')}${o.fee ? `\n• التوصيل = ${money(o.fee)}` : ''}\nالإجمالي ${money(orderGrand(o))} شامل الضريبة والتوصيل · ${ORDER_METHODS[method]}${kind === 'wholesale' ? ' · عميل جملة' : ''}\nمستني موافقة من «طلبات واتساب»`, { type: 'order', id: o.id, no: o.no });
+    alert('info', 'order', `🛒 طلب واتساب ${o.no}${o.test ? ' (تجربة)' : ''}\n${o.name} · ${ph}\n${o.address}\n${o.lines.map(l => l.raw ? `• ${l.name} ${l.unit === 'kg' ? fmtQty(l.qty, 'kg') : l.qty + ' قطعة'} = ${money(l.amount)}` : `• ${l.count} × ${l.name} ${pack(l.packSize)} = ${money(l.amount)}`).join('\n')}${o.fee ? `\n• التوصيل = ${money(o.fee)}` : ''}\nالإجمالي ${money(orderGrand(o))} شامل الضريبة والتوصيل · ${ORDER_METHODS[method]}${kind === 'wholesale' ? ' · عميل جملة' : ''}\nمستني موافقة من «طلبات واتساب»`, { type: 'order', id: o.id, no: o.no });
     if (o.test) S.alerts[S.alerts.length - 1].tg = 'test'; // test orders never reach the owner's Telegram
     audit('order', o.no, `طلب واتساب ${o.no} من ${o.name}: ${money(orderGrand(o))}${o.test ? ' (تجربة)' : ''}`);
-    return { id: o.id, no: o.no, method, total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })) };
+    return { id: o.id, no: o.no, method, total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0), kind, lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount), ...(l.raw ? { raw: true, unit: l.unit, grams: l.unit === 'kg' ? l.qty : null, pieces: l.unit === 'kg' ? null : l.qty } : {}) })) };
   });
 }
 function proofTarget(phone) { // the customer's latest InstaPay order that still waits for money
@@ -1228,7 +1267,7 @@ function orderView(id) { // read-only: what the bot needs to message the custome
   const o = orders().find(x => x.id === id); if (!o) return null;
   const inv = o.invoiceId ? S.docs.invoices.find(v => v.id === o.invoiceId) : null;
   return { id: o.id, no: o.no, status: o.status, test: !!o.test, phone: o.phone, name: o.name, address: o.address, method: o.method, methodName: ORDER_METHODS[o.method], paid: !!o.receiptNo, reason: o.reason || '',
-    lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount) })), total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0),
+    lines: o.lines.map(l => ({ name: l.name, packSize: l.packSize, count: l.count, amount: egpOf(l.amount), ...(l.raw ? { raw: true, unit: l.unit, grams: l.unit === 'kg' ? l.qty : null, pieces: l.unit === 'kg' ? null : l.qty } : {}) })), total: egpOf(orderGrand(o)), itemsTotal: egpOf(o.total), deliveryFee: egpOf(o.fee || 0),
     invoice: inv ? { no: inv.no, date: inv.date, net: egpOf(inv.net), vat: egpOf(inv.vat), total: egpOf(inv.total), vatRate: S.settings.vatRate, deliveryFee: egpOf(inv.deliveryFee || 0) } : null,
     delivery: o.delivery ? { fee: egpOf(o.delivery.fee || 0), eta: (o.delivery.eta && o.delivery.eta.text) || '', note: o.delivery.note || '' } : null,
     paidAmount: egpOf(o.receiptNo && inv ? inv.total : o.paidAmount || 0), due: inv ? egpOf(Math.max(0, inv.total - (o.receiptNo ? inv.total : o.paidAmount || 0))) : null,
@@ -1592,7 +1631,7 @@ function upsertUser({ id, username, name, role, active = true }) {
 }
 
 /* ---------- opening balances (one balanced entry; difference goes to capital) ---------- */
-function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], stock = [], customers = [], suppliers = [] }) {
+function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], stock = [], customers = [], suppliers = [], note = '' }) {
   return tx(() => {
     perm('accountant'); checkDate(date);
     const lines = []; let dr = 0, cr = 0;
@@ -1622,9 +1661,9 @@ function openingBalances({ date, cash = 0, bank = 0, instapay = 0, assets = [], 
     for (const s2 of suppliers) { need(partner(s2.id).type === 'supplier', 'مورد غير صحيح'); C('2101', s2.amount, s2.id); }
     need(dr > 0 || cr > 0, 'مفيش أرصدة');
     if (dr > cr) C('3101', dr - cr); else if (cr > dr) D('3101', cr - dr);
-    const je = post({ date, type: 'opening', ref: { type: 'opening', no }, memo: `أرصدة افتتاحية ${no}`, lines });
+    const je = post({ date, type: 'opening', ref: { type: 'opening', no }, memo: `${note ? String(note).slice(0, 40) : 'أرصدة افتتاحية'} ${no}`, lines });
     S.docs.openings = S.docs.openings || [];
-    S.docs.openings.push({ no, date, je: je.no, by: S.currentUser, at: je.at, total: je.total });
+    S.docs.openings.push({ no, date, je: je.no, by: S.currentUser, at: je.at, total: je.total, ...(note ? { note: String(note).slice(0, 40) } : {}) });
     audit('opening', no, `تسجيل أرصدة افتتاحية ${no} بإجمالي ${money(je.total)}`, date);
     return je;
   });
@@ -1678,6 +1717,11 @@ function cleanPacks(list) { // a product's pack sizes, in grams: standard ones o
   const out = [...new Set(list.map(Number))].filter(g => PACK_SIZES.includes(g) || isOpenWeight(g)).sort((a, b) => a - b);
   need(out.length, 'اختار عبوة واحدة على الأقل'); return out;
 }
+function linkPack(it, o) { // «كيس لعبوة» and «استيكر العبوات»: one item per size and one sticker; picking a new one moves the link from the old one
+  if ('packFor' in o) { const pf = o.packFor ? +o.packFor : 0;
+    if (pf) { need(isInt(pf) && pf >= 50 && pf <= 20000, 'وزن العبوة غير صحيح'); for (const x of S.items) if (x !== it && x.packFor === pf) delete x.packFor; it.packFor = pf; } else delete it.packFor; }
+  if ('sticker' in o) { if (o.sticker) { for (const x of S.items) if (x !== it) delete x.sticker; it.sticker = true; } else delete it.sticker; }
+}
 function saveItem(o) {
   return tx(() => {
     perm();
@@ -1694,6 +1738,7 @@ function saveItem(o) {
     const sub = o.cat === 'meat' || o.cat === 'byproduct' ? String(o.sub || '').trim().slice(0, 40) : ''; // worker-screen section (بلدي فريش، برازيلي، دهون…)
     const fixedCost = (o.cat === 'meat' || o.cat === 'byproduct') && o.fixedCost !== '' && o.fixedCost != null ? o.fixedCost : null; // butchery: this cut always carries this cost per kg
     if (fixedCost != null) need(isInt(fixedCost) && fixedCost >= 0 && fixedCost <= 10000000, 'التكلفة الثابتة غير صحيحة');
+    if (fixedCost != null) o = { ...o, priceRetail: fixedCost, priceWholesale: fixedCost }; // one number: the cost and the sale price (no retail / wholesale)
     if (o.id) {
       const it = item(o.id);
       for (const f of ['priceRetail', 'priceWholesale']) if (it[f] !== o[f]) {
@@ -1706,6 +1751,7 @@ function saveItem(o) {
       if (it.cat === 'product' && o.packs) it.packs = cleanPacks(o.packs);
       if (sub) it.sub = sub; else delete it.sub;
       if (fixedCost != null) it.fixedCost = fixedCost; else delete it.fixedCost;
+      if (o.cat === 'pack') linkPack(it, o);
       Object.assign(it, { name: o.name.trim(), code: o.code, cat: o.cat, unit: o.unit, priceRetail: o.priceRetail || 0, priceWholesale: o.priceWholesale || 0, minQty: o.minQty || 0, vat: o.vat || 0 });
       audit('item_edit', it.code, `تعديل بيانات الصنف ${it.name}`);
       return it;
@@ -1713,7 +1759,7 @@ function saveItem(o) {
     need(!S.items.some(i => i.name === o.name.trim()), 'فيه صنف بنفس الاسم');
     const it = { id: uid('IT'), code: o.code, name: o.name.trim(), cat: o.cat, unit: o.cat === 'pack' ? 'pc' : o.unit, priceRetail: o.priceRetail || 0, priceWholesale: o.priceWholesale || 0, minQty: o.minQty || 0, vat: o.vat || 0, active: true };
     if (o.cat === 'product') { it.packs = o.packs ? cleanPacks(o.packs) : PACK_SIZES.slice(); it.group = o.group || 'مصنعات'; }
-    if (o.cat === 'pack' && o.packFor) { need(isInt(o.packFor) && o.packFor >= 50 && o.packFor <= 20000 && !S.items.some(i => i.cat === 'pack' && i.packFor === o.packFor), 'فيه كيس معرّف للوزن ده'); it.packFor = o.packFor; }
+    if (o.cat === 'pack') linkPack(it, o);
     if (sub) it.sub = sub;
     if (fixedCost != null) it.fixedCost = fixedCost;
     S.items.push(it);
@@ -1798,7 +1844,15 @@ function updateUserAccess({ userId, pages }) { // per person: null = follow the 
     return ua[userId] || null;
   });
 }
-function markAlertsRead(ids) { return tx(() => { S.alerts.forEach(a => { if (!ids || ids.includes(a.id)) a.read = true; }); }); }
+function markAlertsRead(ids) { // «كله مقروء» (no list) is for the owner and the accountant; everyone else marks only alerts they name, and only if they have the alerts screen
+  return tx(() => {
+    need(ids == null || (Array.isArray(ids) && ids.length <= 500 && ids.every(x => typeof x === 'string')), 'بيانات التنبيهات غير صحيحة');
+    if (ids && !ids.length) return; // the daily check passes an empty list just to run the stock watch
+    const u = me(); need(u.active !== false && u.role !== 'pending', 'الصلاحية دي مش متاحة لحسابك');
+    if (ids == null) perm('accountant'); else need(u.role === 'owner' || screensOf(S, u).includes('alerts'), 'الصلاحية دي مش متاحة لحسابك');
+    S.alerts.forEach(a => { if (!ids || ids.includes(a.id)) a.read = true; });
+  });
+}
 
 /* ---------- reports ---------- */
 function ledger({ from, to } = {}) { // per-account dr/cr inside [from,to]
@@ -1927,6 +1981,60 @@ function branchBill({ customerId, from, to }) {
   const total = invs.reduce((s, v) => s + v.total, 0), paid = invs.reduce((s, v) => s + invoicePaid(v), 0);
   return { customer: { id: c.id, name: c.name, phone: c.phone, taxId: c.taxId }, from, to, branches, total, paid, due: total - paid, balance: partnerBalance(c.id), count: invs.length };
 }
+/* ---------- what each account may download ----------
+   The browser of a cost role (owner, accountant, storekeeper) gets the whole books. Everyone else gets a copy with the money
+   taken out: no journal (only the customer / supplier account lines their screens need), no stock values, no batch or butchery
+   costs, no invoice cost, no treasury documents, no audit log, and only the partners, invoices and orders their screens show.
+   Screens come from the same rules as the menu: the role's defaults, the owner's «الشاشات لكل دور», or the person's own list. */
+const SCREEN_ROLES = { home: ['accountant', 'storekeeper', 'supervisor', 'sales'], alerts: ['accountant', 'storekeeper', 'supervisor', 'sales'], batches: ['supervisor', 'accountant'], worker: ['supervisor', 'worker', 'packer'],
+  cutting: ['supervisor', 'storekeeper', 'accountant'], stock: ['storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['storekeeper', 'accountant'], suppliers: ['storekeeper', 'accountant'], orders: ['sales', 'accountant'],
+  invoices: ['sales', 'accountant'], products: ['storekeeper', 'supervisor', 'sales', 'accountant'], customers: ['sales', 'accountant'], items: ['storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['accountant'], staff: ['accountant'],
+  expenses: ['accountant'], journal: ['accountant'], coa: ['accountant'], reports: [], opening: ['accountant'], flow: ['accountant', 'storekeeper', 'supervisor', 'sales'], requests: [], audit: ['accountant'], users: [], access: [], settings: [] };
+const SCREEN_LOCKED = ['users', 'access', 'settings'], MONEY_SCREENS = ['treasury', 'staff', 'expenses', 'journal', 'coa', 'reports', 'opening', 'audit', 'requests'];
+function screensOf(st, user) { // the screens this account can open (never the owner-only ones for anyone else)
+  const role = user.role, set = (st.settings && st.settings.access) || {}, own = ((st.settings && st.settings.userAccess) || {})[user.id];
+  if (role === 'owner') return Object.keys(SCREEN_ROLES);
+  return Object.keys(SCREEN_ROLES).filter(id => {
+    if (SCREEN_LOCKED.includes(id)) return false;
+    if (Array.isArray(own)) return id === 'home' || own.includes(id);
+    return (Array.isArray(set[id]) ? set[id] : SCREEN_ROLES[id]).includes(role);
+  });
+}
+function fullBooks(st, user) { // who downloads everything: a cost role, or someone the owner gave an accounting screen
+  if (!user || user.active === false || !ROLES[user.role] || user.role === 'pending') return false;
+  return !!ROLES[user.role].cost || screensOf(st, user).some(x => MONEY_SCREENS.includes(x));
+}
+function redactFor(st, user) {
+  if (fullBooks(st, user)) return st;
+  const out = JSON.parse(JSON.stringify(st)), V = new Set(user && user.active !== false && ROLES[user.role] && user.role !== 'pending' ? screensOf(st, user) : []);
+  const has = (...x) => x.some(k => V.has(k)), sees = { cust: has('customers', 'invoices', 'orders'), sup: has('purchases', 'suppliers'), inv: has('customers', 'invoices', 'orders'), ord: has('orders'), po: has('purchases', 'suppliers') };
+  const d = out.docs || (out.docs = {});
+  // journal: only the receivable / payable lines the statements on their screens are built from
+  out.journal = (out.journal || []).map(j => ({ ...j, lines: j.lines.filter(l => (sees.cust && l.acc === '1201') || (sees.sup && l.acc === '2101')) })).filter(j => j.lines.length);
+  for (const j of out.journal) delete j.total;
+  for (const l of out.lots || []) { l.value = 0; l.inValue = 0; }
+  const noParts = x => { if (x) { for (const p of x.parts || []) p.value = 0; if ('value' in x) x.value = 0; if ('cost' in x) x.cost = 0; } }; // which lot it came from stays (traceability), what it cost goes
+  for (const b of d.batches || []) { b.cost = 0; delete b.costPerKg; (b.issues || []).forEach(noParts); (b.returns || []).forEach(noParts); delete b.je; }
+  for (const r of d.butcheries || []) { (r.inputs || []).forEach(noParts); (r.packs || []).forEach(noParts); (r.outputs || []).forEach(o => { if (o.value != null) o.value = 0; }); }
+  for (const c of d.cuttings || []) { c.cost = 0; (c.outputs || []).forEach(noParts); }
+  for (const w of d.writeoffs || []) w.value = 0;
+  d.invoices = sees.inv ? (d.invoices || []).map(v => { v.cost = 0; delete v.rawCosts; (v.lines || []).forEach(noParts); return v; }) : [];
+  d.returns = sees.inv ? (d.returns || []).map(r => { noParts(r); (r.lines || []).forEach(noParts); return r; }) : [];
+  d.receipts = sees.inv ? (d.receipts || []) : [];
+  d.orders = sees.ord ? (d.orders || []) : (d.orders || []).filter(o => o.status === 'pending').map(o => ({ id: o.id, status: o.status, lines: o.lines.map(l => ({ productId: l.productId, packSize: l.packSize, qty: l.qty })) })); // pending orders still hold stock on the stock screens
+  d.purchases = sees.po ? (d.purchases || []) : [];
+  d.payments = sees.po ? (d.payments || []) : [];
+  for (const k of ['expenses', 'cash', 'depreciation', 'deposits', 'advances', 'custody', 'liabPays', 'openings']) d[k] = [];
+  d.changes = (d.changes || []).filter(c => c.by === user.id); // their own edit requests only
+  out.partners = (out.partners || []).filter(p => (p.type === 'customer' && sees.cust) || (p.type === 'supplier' && sees.sup));
+  for (const i of out.items || []) delete i.fixedCost;
+  out.staff = []; out.assets = []; out.audit = []; out.priceHistory = sees.inv ? (out.priceHistory || []) : [];
+  out.alerts = (out.alerts || []).filter(a => !['order', 'request', 'change'].includes(a.kind) || (a.kind === 'order' && sees.ord));
+  if (out.settings) { delete out.settings.tgChat; delete out.settings.tgToken; delete out.settings.salesTarget; }
+  out.redacted = true;
+  return out;
+}
+
 /* integrity: books balanced, sub-ledgers match GL, inventory matches lots */
 function integrity() {
   const m = ledger({});
@@ -2294,7 +2402,7 @@ function init() { if (!load()) { seed(); save(); } return S; }
 
 root.ERP = {
   init, reset, save, exportJSON, get S() { return S; },
-  ACCOUNTS, LEAF, MEAT_SECTIONS, itemCost, reopenBatch, cancelBatch, setCustomerPrices, rawSellable, avgCostPerUnit, sellStores, reopenButchery, lotUsage, butcheryEditInput, cancelButchery, updateUserAccess, butcheryEditOutput, butcheryDropInput, butcheryDropPack, CHANGE_OPS, decideChange, editPurchaseLine, invoiceReturn, invoicePrice, invoiceReturned, payLabel, updateAccess, finishMeat, returnRework, batchKg, batchCostNow, running, isOpenWeight, openButchery, butcheryInput, butcheryPack, butcheryOutput, butcheryDropOutput, newCutItem, closeButchery, butIn, butOut, butCost, BASE_ACCOUNTS, DEPOSIT_KINDS, depositSources, moneyKind, methodAcc, methodName, accLabel, staffName, personBalance, deposit, payLiability, advance, advanceBack, custody, settleCustody, saveAccount, deleteAccount, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
+  ACCOUNTS, LEAF, MEAT_SECTIONS, redactFor, fullBooks, screensOf, SCREEN_ROLES, packStores, rawStores, itemCost, reopenBatch, cancelBatch, setCustomerPrices, rawSellable, avgCostPerUnit, sellStores, reopenButchery, lotUsage, butcheryEditInput, cancelButchery, updateUserAccess, butcheryEditOutput, butcheryDropInput, butcheryDropPack, CHANGE_OPS, decideChange, editPurchaseLine, invoiceReturn, invoicePrice, invoiceReturned, payLabel, updateAccess, finishMeat, returnRework, batchKg, batchCostNow, running, isOpenWeight, openButchery, butcheryInput, butcheryPack, butcheryOutput, butcheryDropOutput, newCutItem, closeButchery, butIn, butOut, butCost, butSale, BASE_ACCOUNTS, DEPOSIT_KINDS, depositSources, moneyKind, methodAcc, methodName, accLabel, staffName, personBalance, deposit, payLiability, advance, advanceBack, custody, settleCustody, saveAccount, deleteAccount, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
   item, partner, userName, whName, me, available, cashBalance, invoicePaid, partnerBalance, partnerTotals, partnerStatement, branchBill, batchById, issuedOf, priceFor, monthlyDepreciation,
   opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderPayLink, orderCardPaid, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,

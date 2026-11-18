@@ -1,7 +1,7 @@
 // Boom Meat ERP — Supabase Edge Function. Every write to the books goes through here.
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/engine.js';
-import { runOp, runAdmin } from '../_shared/core.mjs';
+import { runOp, runAdmin, runState } from '../_shared/core.mjs';
 import { notifyBot } from '../_shared/notify.ts';
 import { copyText, getViewers, setViewers, MAX_VIEWERS } from '../_shared/viewers.ts';
 
@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
     if (!user) return json(401, { error: 'سجل دخول الأول' });
     const { data: profile } = await admin.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
     const { op, args } = await req.json();
+    if (op === 'state') { const r = await runState({ E, db, profile }); return json(r.status, r.body); } // the books, filtered for this account
     if (['createUser', 'updateUser', 'resetPassword', 'setTelegramToken', 'approveRequest', 'rejectRequest', 'tgLinkCode'].includes(op)) {
       const r = await runAdmin({ E, db, profile, op, args, auth });
       return json(r.status, r.body);
