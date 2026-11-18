@@ -1199,3 +1199,15 @@ select.f{text-overflow:clip}
 .kpi b{letter-spacing:-.02em}
 .kpi b em{letter-spacing:0}
 table.t td.n,.n{font-variant-numeric:tabular-nums}
+/* butchery bags: several types in one window — one line per type: type | count | remove, with its cost or a stock warning under it */
+#bp-rows{display:flex;flex-direction:column;gap:10px}
+.bp-r{display:grid;grid-template-columns:minmax(0,1fr) 120px 44px;gap:6px 10px;align-items:end}
+.bp-r>.fld{margin:0}.bp-r>.fld.fld-wide{grid-column:auto}
+.bp-r .bp-del{height:44px;width:44px}
+.bp-r .bp-del[hidden]{display:grid;visibility:hidden}
+.bp-r .bp-m{grid-column:1/-1;min-height:0;font-size:12.5px}.bp-r .bp-m:empty{display:none}
+.bp-r .bp-m.bad{color:var(--bad);font-weight:700}
+.bp-r+.bp-r .fld>span{display:none} /* labels once, on the first line */
+@media (max-width:520px){.bp-r{grid-template-columns:minmax(0,1fr) 86px 44px}}
+.bp-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between}
+.bp-foot b{font-variant-numeric:tabular-nums}

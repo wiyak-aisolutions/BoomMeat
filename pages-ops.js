@@ -491,8 +491,43 @@ ACTS['bu-pack'] = id => { const ps = E.packStores(), all = S().items.filter(i =>
   const kind = x => (x.i.packFor || /كيس|اكياس|أكياس|فاكيوم/.test(x.i.name) ? 0 : x.i.sticker || /استيكر|ستيكر/.test(x.i.name) ? 1 : 2), by = (a, c) => kind(a) - kind(c) || a.i.name.localeCompare(c.i.name, 'ar');
   const opt = ({ i, n }) => `<option value="${i.id}">${esc(i.name)}${i.packFor ? ` (كيس ${packName(i.packFor)})` : ''} · متاح ${n.toLocaleString('en-US')}</option>`, has = all.filter(x => x.n > 0).sort(by), none = all.filter(x => !x.n).sort(by);
   const grp = (l, k, t) => { const g = l.filter(x => kind(x) === k); return g.length ? `<optgroup label="${t}">${g.map(opt).join('')}</optgroup>` : ''; };
-  modal('أكياس اتصرفت على التشغيلة', `<div class="note info">تكلفة الأكياس بتتضاف على تكلفة القطعيات. بيتصرف من مخزن التعبئة أو مخزن الاستلام.</div><div class="fgrid"><label class="fld"><span>الصنف</span><select class="f" id="bp-i">${grp(has, 0, 'أكياس')}${grp(has, 1, 'استيكرات')}${grp(has, 2, 'مواد تعبئة تانية')}${none.length ? `<optgroup label="غيرهم (مفيش منهم دلوقتي)">${none.map(opt).join('')}</optgroup>` : ''}</select></label><label class="fld"><span>العدد</span><input class="f" id="bp-q" type="number" min="1" step="1"></label></div>`,
-  { saveText: 'صرف', save: async () => { await E.butcheryPack({ id, itemId: val('bp-i'), qty: toI(val('bp-q')) }); toast('اتصرفت الأكياس', 'ok'); } }); };
+  const opts = `${grp(has, 0, 'أكياس')}${grp(has, 1, 'استيكرات')}${grp(has, 2, 'مواد تعبئة تانية')}${none.length ? `<optgroup label="غيرهم (مفيش منهم دلوقتي)">${none.map(opt).join('')}</optgroup>` : ''}`;
+  const stock = iid => (all.find(x => x.i.id === iid) || { n: 0 }).n, cost = canCost();
+  // smart start: the bag types this run already used, else the ones the last run used, else the first bag in stock
+  const runs = S().docs.butcheries || [], cur = runs.find(x => x.id === id), prev = runs.filter(x => x.id !== id && (x.packs || []).length).slice(-1)[0];
+  const seed = [...new Set(((cur && cur.packs.length ? cur.packs : prev ? prev.packs : []) || []).map(p => p.itemId))].filter(iid => all.some(x => x.i.id === iid));
+  const start = seed.length ? seed : has[0] ? [has[0].i.id] : all[0] ? [all[0].i.id] : [];
+  const row = iid => `<div class="bp-r"><label class="fld"><span>الصنف</span><select class="f bp-i">${opts}</select></label><label class="fld"><span>العدد</span><input class="f bp-q" type="number" min="1" step="1" inputmode="numeric"></label><button type="button" class="icon-btn bp-del" aria-label="شيل السطر">${ic('x')}</button><small class="crumb bp-m"></small></div>`;
+  modal('أكياس اتصرفت على التشغيلة', `<div class="note info">تكلفة الأكياس بتتضاف على تكلفة القطعيات. بيتصرف من مخزن التعبئة أو مخزن الاستلام. تقدر تصرف كذا نوع مرة واحدة.</div>
+    ${seed.length ? `<div class="crumb">${cur && cur.packs.length ? 'دي الأنواع اللي اتصرفت على التشغيلة دي قبل كده' : 'دي الأنواع اللي اتصرفت آخر تشغيلة'}، اكتب العدد بس أو غيّر النوع.</div>` : ''}
+    <div id="bp-rows">${start.map(row).join('')}</div>
+    <div class="bp-foot"><button type="button" class="btn" id="bp-add">${ic('plus')} نوع تاني</button><b id="bp-sum"></b></div>`,
+  { saveText: 'صرف', save: async () => {
+    const lines = [...document.querySelectorAll('.bp-r')].map(r => ({ itemId: r.querySelector('.bp-i').value, raw: r.querySelector('.bp-q').value.trim() })).filter(l => l.raw !== '');
+    if (!lines.length) throw new Error('اكتب العدد قدام نوع واحد على الأقل');
+    const sum = {}; for (const l of lines) { const q = toI(l.raw); if (!(q > 0)) throw new Error(`العدد غير صحيح قدام "${E.item(l.itemId).name}"`); sum[l.itemId] = (sum[l.itemId] || 0) + q; } // the same type twice is added up
+    for (const [iid, q] of Object.entries(sum)) if (q > stock(iid)) throw new Error(`"${E.item(iid).name}" المتاح منه ${stock(iid).toLocaleString('en-US')} بس، وانت كاتب ${q.toLocaleString('en-US')}`);
+    const done = [];
+    for (const [iid, q] of Object.entries(sum)) {
+      try { await E.butcheryPack({ id, itemId: iid, qty: q }); done.push(`${E.item(iid).name} × ${q}`); }
+      catch (err) { throw new Error(done.length ? `اتصرف: ${done.join('، ')}. ووقف عند "${E.item(iid).name}": ${err.message}` : err.message); }
+    }
+    toast(done.length > 1 ? `اتصرف ${done.length === 2 ? 'نوعين' : done.length + ' أنواع'}: ${done.join('، ')}` : 'اتصرفت الأكياس', 'ok');
+  } });
+  const box = document.getElementById('bp-rows');
+  const paint = () => { const rs = [...box.querySelectorAll('.bp-r')]; let tot = 0, n = 0; const used = {};
+    rs.forEach(r => { const iid = r.querySelector('.bp-i').value, q = toI(r.querySelector('.bp-q').value || '0') || 0; used[iid] = (used[iid] || 0) + q; });
+    rs.forEach(r => { const iid = r.querySelector('.bp-i').value, q = toI(r.querySelector('.bp-q').value || '0') || 0, c = E.itemCost(iid).v, m = r.querySelector('.bp-m'), over = used[iid] > stock(iid);
+      r.querySelector('.bp-q').classList.toggle('invalid', over); r.querySelector('.bp-del').hidden = rs.length < 2;
+      m.className = 'crumb bp-m' + (over ? ' bad' : ''); m.textContent = over ? `المتاح ${stock(iid).toLocaleString('en-US')} بس` : q && cost && c ? `${fm0(c * q)} ج` : '';
+      if (q > 0) { n += q; tot += c * q; } });
+    document.getElementById('bp-sum').textContent = n ? `الإجمالي ${n.toLocaleString('en-US')} كيس${cost && tot ? ` · ${fm0(tot)} ج` : ''}` : ''; };
+  const pick = (r, iid) => { if (iid) r.querySelector('.bp-i').value = iid; };
+  [...box.querySelectorAll('.bp-r')].forEach((r, i) => pick(r, start[i]));
+  box.addEventListener('input', paint); box.addEventListener('change', paint);
+  box.addEventListener('click', e => { const d = e.target.closest('.bp-del'); if (d && box.children.length > 1) { d.closest('.bp-r').remove(); paint(); } });
+  document.getElementById('bp-add').onclick = () => { const taken = new Set([...box.querySelectorAll('.bp-i')].map(x => x.value)), nx = has.find(x => !taken.has(x.i.id)); box.insertAdjacentHTML('beforeend', row()); const r = box.lastElementChild; pick(r, nx ? nx.i.id : ''); paint(); r.querySelector('.bp-q').focus(); };
+  paint(); const q0 = box.querySelector('.bp-q'); if (q0) q0.focus(); };
 ACTS['bu-newitem'] = () => modal('صنف جديد من الجزارة', `<div class="fgrid"><label class="fld"><span>الاسم</span><input class="f" id="ni2-n" placeholder="مثلًا: كباب حلة"></label>
   <label class="fld"><span>النوع</span><select class="f" id="ni2-c"><option value="meat">قطعية (ليها سعر بيع)</option><option value="byproduct">ناتج (عضم، دهن، فضلات…) تكلفته صفر</option></select></label>
   <label class="fld"><span>سعر بيع الكيلو (ج) للقطعية</span><input class="f" id="ni2-p" type="number" min="0" step="1"></label>
