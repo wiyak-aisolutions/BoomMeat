@@ -97,6 +97,7 @@ export async function runShop({ E, db, action, body, telegram, copy, maxRetries 
   }
   // writes the bot may do: place an order, attach a transfer screenshot, record that a message went out
   const WRITES = { order: ['placeOrder', () => b.order || {}], proof: ['orderProof', () => ({ phone: b.phone, path: b.path })], notified: ['orderNotified', () => ({ id: b.id, kind: b.kind, image: b.image === true })],
+    feedback: ['orderFeedback', () => ({ phone: b.phone, id: b.id, rating: b.rating, text: b.text })], // the customer's opinion after a delivery
     payLink: ['orderPayLink', () => b.link || {}], cardPaid: ['orderCardPaid', () => b.card || {}] }; // Paymob: link created / verified callback
   if (!WRITES[action]) return { status: 400, body: { error: 'طلب غير معروف' } };
   const [fn, argsOf] = WRITES[action];

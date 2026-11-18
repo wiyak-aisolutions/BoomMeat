@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
       const o: any = r.body?.result || {};
       const kind = a.action === 'send' ? (o.receiptNo ? 'paid' : 'approved')
         : a.action === 'paid' ? (o.status === 'pending' ? 'proofok' : (o.receiptNo && o.sentAt ? 'paid' : ''))
-        : a.action === 'delivered' ? (o.sentAt && (o.log || []).slice(-2)[0]?.action === 'paid' ? 'paid' : '') // cash collected at the door → invoice image
+        : a.action === 'delivered' ? (o.sentAt && (o.log || []).slice(-2)[0]?.action === 'paid' ? 'deliveredpaid' : 'delivered') // cash collected at the door → invoice image; both ask the customer's opinion
         : ({ proofok: 'proofok', nopay: 'nopay', eta: o.sentAt ? 'eta' : '', resend: 'resend', reject: 'rejected', out: 'out' } as Record<string, string>)[a.action] || '';
       if (kind) await notifyBot(admin, a.id, kind);
     }

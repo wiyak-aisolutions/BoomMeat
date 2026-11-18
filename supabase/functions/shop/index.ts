@@ -60,8 +60,15 @@ async function uploadProof(b: Record<string, string>) {
       fd.append('caption', `💳 تحويل إنستاباي · ${o.no}\n${o.name} · ${o.phone}\nالمبلغ المطلوب: ${o.total} ج\n\nالتحويل وصل؟`);
       fd.append('reply_markup', JSON.stringify({ inline_keyboard: [[{ text: 'وصلت ✅', callback_data: `pay:ok:${o.id}` }, { text: 'موصلتش ❌', callback_data: `pay:no:${o.id}` }]] }));
       fd.append('photo', new Blob([bytes], { type: mime }), 'proof.' + path.split('.').pop());
-      try { await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: fd }); } catch (_e) { /* the dashboard still shows it */ }
-      await copyPhoto(admin, bytes, mime, 'proof.' + path.split('.').pop(), `💳 تحويل إنستاباي · ${o.no}\n${o.name} · ${o.phone}\nالمبلغ المطلوب: ${o.total} ج\n\n${VIEWER_NOTE}`);
+      // The photo is already saved on the order. Telegram (a few MB, plus the viewers' copies) goes out in the background,
+      // so the bot gets its answer at once and the customer is not left waiting (Nov 18: it took over 30 s and the bot gave up).
+      const tell = (async () => {
+        try { await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: fd, signal: AbortSignal.timeout(45000) }); } catch (_e) { /* the dashboard still shows it */ }
+        try { await copyPhoto(admin, bytes, mime, 'proof.' + path.split('.').pop(), `💳 تحويل إنستاباي · ${o.no}\n${o.name} · ${o.phone}\nالمبلغ المطلوب: ${o.total} ج\n\n${VIEWER_NOTE}`); } catch (_e) { /* viewers are best effort */ }
+      })();
+      // deno-lint-ignore no-explicit-any
+      const rt = (globalThis as any).EdgeRuntime;
+      if (rt && typeof rt.waitUntil === 'function') rt.waitUntil(tell); else await tell;
     }
   }
   return json(200, { ok: true, result: o });

@@ -11,6 +11,9 @@ const olw = l => (l.unit === 'pc' ? `${l.qty} قطعة` : `${kgf(l.qty)} كجم`
 const ofee = o => o.fee != null ? o.fee : (o.delivery && o.delivery.fee) || 0; // new orders carry the fixed delivery fee
 const ogrand = o => o.total + ofee(o);
 const ostage = o => o.deliveredAt ? '<span class="pill ok">اتسلّم ✓</span>' : o.outAt ? '<span class="pill info">في الطريق 🚚</span>' : '';
+// what the customer thought of the delivery (asked by the bot after «الأوردر وصل», or typed in by the team)
+const FBR = { 3: ['ok', '😍 ممتاز'], 2: ['info', '🙂 كويس'], 1: ['bad', '😕 محتاج يتحسن'] };
+const fbPill = o => !o.feedback ? '' : o.feedback.rating ? `<span class="pill ${FBR[o.feedback.rating][0]}">${FBR[o.feedback.rating][1]}</span>` : '<span class="pill mut">💬 كتب رأيه</span>';
 PAGES.orders = () => {
   const s = S(), all = (s.docs.orders || []).slice().reverse();
   const tb = tabs('ord', [['all', 'الكل'], ['pending', 'مستنية'], ['approved', 'متوافق عليها'], ['rejected', 'مرفوضة']], 'pending');
@@ -21,7 +24,7 @@ PAGES.orders = () => {
       <div class="oc-b"><b>${esc(o.name)}</b>${o.kind === 'wholesale' ? ' <span class="pill red">جملة</span>' : ''}<small class="mono">${esc(o.phone)}</small></div>
       <div class="oc-c">${o.lines.map(l => `<span>${l.raw ? `${esc(l.name)} <em>${olw(l)}</em>` : `${l.count} × ${esc(l.name)} <em>${opack(l.packSize)}</em>`}</span>`).join('')}</div>
       <div class="oc-d"><b>${fm(ogrand(o))} ج</b><small>${E.ORDER_METHODS[o.method] || ''}${o.proof ? (o.proof.status === 'ok' ? ' · ✅ التحويل وصل' : o.proof.status === 'rejected' ? ' · ❌ التحويل موصلش' : ' · 📎 صورة تحويل مستنية') : ''}${o.card && o.card.status === 'paid' ? ' · 💳 الفيزا اتدفعت' : ''}</small></div>
-      <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}${ostage(o)}</div>
+      <div class="oc-e"><span class="pill ${OSTAT[o.status][0]}">${OSTAT[o.status][1]}</span>${o.status === 'approved' ? (o.receiptNo ? '<span class="pill ok">اتحصّل</span>' : o.paidAmount ? '<span class="pill warn">باقي التوصيل</span>' : '<span class="pill warn">لسه متحصلش</span>') : ''}${o.status === 'approved' && !o.sentAt ? '<span class="pill info">مستني الإرسال</span>' : ''}${ostage(o)}${fbPill(o)}</div>
       <span class="oc-go" aria-hidden="true">${ic('menu')}</span></a>`;
   page('طلبات واتساب', `<div class="kpis"><div class="kpi main"><small>مستنية موافقة</small><b>${pend.length}</b><span class="t">${fm0(sumBy(pend, ogrand))} ج شامل الضريبة والتوصيل</span></div>
       <div class="kpi"><small>متوافق عليها ولسه متحصلتش</small><b>${unpaid.length}</b><span class="t">${fm0(sumBy(unpaid, o => ogrand(o) - (o.paidAmount || 0)))} ج</span></div></div>
@@ -29,7 +32,23 @@ PAGES.orders = () => {
     <div class="ocs">${rows.map(card).join('') || '<div class="card"><div class="bd"><div class="empty">مفيش طلبات هنا</div></div></div>'}</div>
     <p class="crumb" style="margin-top:12px">دوس على أي طلب تشوف تفاصيله وصورة التحويل ومين وافق عليه.${all.some(o => o.test) ? ' الطلبات اللي عليها «تجربة» جاية من رقم تجربة البوت: مبتتحولش لفاتورة، فمفيهاش موافقة.' : ''}</p>`);
 };
-const OACT = { placed: 'وصل الطلب من الواتساب', delivery: 'اتحدد التوصيل', send: 'اتبعت للعميل', proof: 'العميل بعت صورة التحويل', proof_rejected: 'التحويل موصلش، واتطلب من العميل يبعته تاني', approved: 'اتوافق على الطلب واتعملت الفاتورة', rejected: 'اترفض الطلب', paid: 'اتسجل إن الفلوس اتحصّلت', proof_ok: 'التحويل وصل', out: 'الأوردر خرج للتوصيل', delivered: 'الأوردر وصل للعميل واتقفل', invoice_sent: 'الفاتورة اتبعتت للعميل على الواتساب', confirm_sent: 'تأكيد الأوردر اتبعت للعميل', edited: 'اتعدّل الطلب', deleted: 'اتمسح' };
+/* ========== CUSTOMER OPINIONS: every delivered order the customer rated or wrote about ========== */
+PAGES.reviews = () => {
+  const done = (S().docs.orders || []).filter(o => o.deliveredAt && !o.test).slice().reverse();
+  const got = done.filter(o => o.feedback), rated = got.filter(o => o.feedback.rating), asked = done.filter(o => o.fbAskedAt);
+  const cnt = r => rated.filter(o => o.feedback.rating === r).length, happy = cnt(3) + cnt(2);
+  const tb = tabs('rev', [['all', 'الكل'], ['3', FBR[3][1]], ['2', FBR[2][1]], ['1', FBR[1][1]], ['wait', 'لسه مردوش']], 'all');
+  const rows = (tb.cur === 'wait' ? asked.filter(o => !o.feedback) : tb.cur === 'all' ? got : got.filter(o => String(o.feedback.rating) === tb.cur)).filter(o => match('rvq', o.no, o.name, o.phone, o.feedback ? o.feedback.text : ''));
+  const cols = [{ t: 'الطلب', f: o => `<b class="mono">${esc(o.no)}</b>` }, { t: 'العميل', f: o => `<b>${esc(o.name)}</b><br><small class="mono">${esc(o.phone)}</small>` },
+    { t: 'التقييم', f: o => fbPill(o) || '<span class="pill warn">مستنيين رده</span>' }, { t: 'قال إيه', w: 1, f: o => o.feedback && o.feedback.text ? esc(o.feedback.text) : '<span class="crumb">—</span>' },
+    { t: 'اتسلّم', f: o => tf(o.deliveredAt) }, { t: 'الرأي', f: o => o.feedback ? tf(o.feedback.at) + (o.feedback.via === 'staff' ? '<br><small class="crumb">سجّله الفريق</small>' : '') : '—' }];
+  page('آراء العملاء', `<div class="kpis"><div class="kpi main"><small>العملاء الراضيين</small><b>${rated.length ? Math.round(happy * 100 / rated.length) + '٪' : '—'}</b><span class="t">${rated.length ? `${happy} من ${rated.length} قيّموا` : 'مفيش تقييمات لسه'}</span></div>
+      <div class="kpi"><small>${FBR[3][1]}</small><b>${cnt(3)}</b></div><div class="kpi"><small>${FBR[2][1]}</small><b>${cnt(2)}</b></div><div class="kpi"><small>${FBR[1][1]}</small><b>${cnt(1)}</b><span class="t">${cnt(1) ? 'كلّمهم وحلّ المشكلة' : ''}</span></div></div>
+    <div class="bar">${tb.html}${searchBox('rvq', 'ابحث بالاسم أو رقم الطلب أو كلمة من الرأي')}</div>
+    <p class="crumb" style="margin:0 0 12px">البوت بيسأل العميل عن رأيه على الواتساب أول ما تدوس «الأوردر وصل».${asked.length ? ` لحد دلوقتي اتسأل ${asked.length}، وردّ منهم ${asked.filter(o => o.feedback).length}.` : ''}</p>
+    <div class="card"><div class="bd">${table('rev', cols, rows, { onRow: o => 'order/' + o.id, empty: tb.cur === 'wait' ? 'مفيش حد مستنيين رده' : 'مفيش آراء هنا لسه. البوت بيسأل العميل عن رأيه أول ما تدوس «الأوردر وصل».' })}</div></div>`);
+};
+const OACT = { placed: 'وصل الطلب من الواتساب', delivery: 'اتحدد التوصيل', send: 'اتبعت للعميل', proof: 'العميل بعت صورة التحويل', proof_rejected: 'التحويل موصلش، واتطلب من العميل يبعته تاني', approved: 'اتوافق على الطلب واتعملت الفاتورة', rejected: 'اترفض الطلب', paid: 'اتسجل إن الفلوس اتحصّلت', proof_ok: 'التحويل وصل', out: 'الأوردر خرج للتوصيل', delivered: 'الأوردر وصل للعميل واتقفل', invoice_sent: 'الفاتورة اتبعتت للعميل على الواتساب', confirm_sent: 'تأكيد الأوردر اتبعت للعميل', edited: 'اتعدّل الطلب', deleted: 'اتمسح', fb_asked: 'البوت سأل العميل عن رأيه', feedback: 'رأي العميل' };
 const PSTAT = { pending: '<span class="pill warn">مستنية مراجعة</span>', ok: '<span class="pill ok">التحويل وصل</span>', rejected: '<span class="pill bad">التحويل موصلش</span>' };
 const whoName = by => by === 'bot' ? 'بوت الواتساب' : by === 'telegram' ? 'المالك من تليجرام' : by ? E.userName(by) : '—';
 function orderTimeline(o) {
@@ -137,6 +156,10 @@ PAGES.order = id => {
           <p style="margin:12px 0 10px"><b>العنوان:</b> ${esc(o.address)}</p>
           <div class="bar" style="margin:0">${wa}${o.location && o.location.lat ? `<a class="btn" href="https://maps.google.com/?q=${encodeURIComponent(o.location.lat + ',' + o.location.lng)}" target="_blank" rel="noopener">${ic('send')} افتح اللوكيشن</a>` : ''}${o.invoiceId ? `<a class="btn" href="#invoice/${esc(o.invoiceId)}">${ic('bill')} الفاتورة ${esc(o.invoiceNo)}</a>` : ''}</div>
         </div></div>
+        ${o.deliveredAt ? `<div class="card"><div class="hd"><h3>رأي العميل</h3>${o.feedback ? `<span class="sub">${tf(o.feedback.at)}</span><div class="tools">${fbPill(o)}</div>` : ''}</div><div class="bd">
+          ${o.feedback ? `${o.feedback.text ? `<p class="fb-q">«${esc(o.feedback.text)}»</p>` : '<p class="crumb" style="margin:0 0 10px">اختار التقييم ومكتبش تفاصيل.</p>'}<small class="crumb">${o.feedback.via === 'staff' ? 'سجّله ' + esc(whoName(o.feedback.by)) : 'من العميل على الواتساب'}</small>` : `<div class="empty">${o.fbAskedAt ? 'البوت سأل العميل عن رأيه، ولسه مردش.' : 'العميل لسه متسألش عن رأيه.'}</div>`}
+          ${canAct ? `<div class="bar" style="margin:12px 0 0"><button class="btn" data-act="ord-fb" data-arg="${o.id}">${o.feedback ? 'عدّل أو زوّد على الرأي' : 'سجّل رأي العميل'}</button></div>` : ''}
+        </div></div>` : ''}
         <div class="card"><div class="hd"><h3>صورة التحويل</h3>${o.proof ? `<span class="sub">${tf(o.proof.at)}</span><div class="tools">${PSTAT[o.proof.status || 'pending']}</div>` : ''}</div><div class="bd" id="proof-box">${o.proof ? '<div class="empty">بتحمّل الصورة…</div>' : `<div class="empty">${o.method === 'instapay' ? 'العميل لسه مبعتش صورة التحويل.' : 'الدفع كاش عند الاستلام، مفيش تحويل.'}</div>`}</div></div>
       </div>
     </div>`, { crumb: '<a href="#orders">طلبات واتساب</a> / ' + esc(o.no) });
@@ -179,6 +202,11 @@ ACTS['ord-out'] = id => { const o = ordOf(id), due = ogrand(o) - (o.receiptNo ? 
 ACTS['ord-delivered'] = id => { const o = ordOf(id), cashDue = !o.receiptNo ? ogrand(o) - (o.paidAmount || 0) : 0;
   modal(`الأوردر وصل · ${esc(o.no)}`, `<p>الأوردر وصل لـ <b>${esc(o.name)}</b>؟ الطلب هيتقفل.</p>${cashDue > 0 ? `<p>هيتسجل تحصيل <b>${fm(cashDue)} ج</b> كاش، والعميل هيجيله «تم الدفع» وفاتورته على الواتساب.</p>` : ''}`,
   { saveText: cashDue > 0 ? 'أيوه، وصل واتحصّل' : 'أيوه، وصل', save: async () => { await E.decideOrder({ id, action: 'delivered' }); U.afterChange(); toast('الأوردر اتقفل', 'ok'); } }); };
+ACTS['ord-fb'] = id => { const o = ordOf(id), f = o.feedback || {};
+  modal(`رأي العميل · ${esc(o.no)}`, `<p class="crumb">لو العميل قال رأيه في التليفون أو للمندوب، سجّله هنا عشان يفضل على الطلب.</p>
+    <label class="fld"><span>التقييم</span><select class="f" id="fb-rate"><option value="">من غير تقييم</option>${[3, 2, 1].map(r => `<option value="${r}" ${f.rating === r ? 'selected' : ''}>${FBR[r][1]}</option>`).join('')}</select></label>
+    <label class="fld fld-wide"><span>قال إيه؟ (اختياري)</span><textarea class="f" id="fb-text" rows="3" maxlength="500" placeholder="مثلاً: اللحمة ممتازة بس التوصيل اتأخر"></textarea></label>`,
+  { saveText: 'سجّل الرأي', save: async () => { const r = val('fb-rate'), t = val('fb-text').trim(); if (!r && t.length < 2) throw new Error('اختار التقييم أو اكتب الرأي'); await E.decideOrder({ id, action: 'feedback', rating: r ? +r : null, note: t }); U.afterChange(); toast('اتسجل رأي العميل', 'ok'); } }); };
 ACTS['ord-resend'] = id => run(() => E.decideOrder({ id, action: 'resend' }), 'الفاتورة هتتبعت للعميل تاني');
 ACTS['ord-del'] = id => run(() => E.decideOrder({ id, action: 'delete' }), 'اتمسح طلب التجربة');
 

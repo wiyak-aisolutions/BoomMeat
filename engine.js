@@ -1142,6 +1142,7 @@ function catalog(phone) { // read-only view for the bot: prices in EGP per kg, s
       packs: packsOf(i).map(size => ({ size, price: egpOf(mulDiv(size, priceFor(i, c || { kind }), 1000)), inStock: Math.floor(orderable(i.id, size) / size) })),
     })),
     // raw cuts sold by weight (e.g. صره): order with { productId, grams } (or pieces for per-piece items)
+    feedback: fbPending(phone), // asked for an opinion after a delivery and has not written one yet
     raw: S.items.filter(i => botRaw(i) && priceFor(i, c || { kind }) > 100).map(i => ({
       id: i.id, code: i.code, name: i.name, unit: i.unit, pricePerKg: egpOf(priceFor(i, c || { kind })), retailPerKg: egpOf(i.priceRetail), wholesalePerKg: egpOf(i.priceWholesale),
       stock: i.unit === 'kg' ? orderableRaw(i.id) / 1000 : orderableRaw(i.id), minGrams: i.unit === 'kg' ? 250 : null,
@@ -1216,11 +1217,39 @@ function orderProof({ phone, path }) {
 function orderNotified({ id, kind, image }) { // image: the receipt picture went out (only then is the invoice "sent")
   return tx(() => {
     const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
-    need(['approved', 'paid', 'resend', 'nopay', 'rejected', 'proofok', 'eta', 'out'].includes(kind), 'نوع الرسالة غير معروف');
+    need(['approved', 'paid', 'resend', 'nopay', 'rejected', 'proofok', 'eta', 'out', 'delivered', 'deliveredpaid'].includes(kind), 'نوع الرسالة غير معروف');
+    if (/^delivered/.test(kind) && o.deliveredAt && !o.fbAskedAt) { o.fbAskedAt = stamp(today()); olog(o, 'fb_asked', ''); }
     if (image === true && o.invoiceId) { o.invoiceSentAt = stamp(today()); olog(o, 'invoice_sent', kind); }
     else olog(o, 'confirm_sent', kind);
     return { ok: true };
   });
+}
+/* ---- customer opinion on a delivered order: the bot asks after «الأوردر وصل», the answer is kept on the order ---- */
+const FB_RATING = { 3: 'ممتاز', 2: 'كويس', 1: 'محتاج يتحسن' };
+function fbTarget(phone, id) { // the order an opinion belongs to: the one named, else the customer's latest delivery this week
+  const ph = normPhone(phone), done = orders().filter(o => o.deliveredAt && !o.test);
+  if (id) return done.find(o => o.id === id && (!ph || o.phone === ph)) || null;
+  const since = addDays(today(), -7);
+  return ph.length >= 8 ? done.filter(o => o.phone === ph && o.deliveredAt.slice(0, 10) >= since).slice(-1)[0] || null : null;
+}
+function fbPending(phone) { // asked, and no words yet: the bot treats the customer's next free text as the opinion
+  const o = fbTarget(phone); return o && o.fbAskedAt && !(o.feedback && o.feedback.text) && o.deliveredAt.slice(0, 10) >= addDays(today(), -3) ? { id: o.id, no: o.no, rated: !!(o.feedback && o.feedback.rating) } : null;
+}
+function saveFeedback(o, rating, text, via) {
+  const r = rating == null || rating === '' ? null : +rating, t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  need(r == null || [1, 2, 3].includes(r), 'التقييم غير صحيح'); need(r != null || t.length >= 2, 'اختار التقييم أو اكتب الرأي');
+  const f = o.feedback || (o.feedback = { rating: null, text: '' }), was = f.rating, hadText = f.text;
+  if (r != null) f.rating = r;
+  if (t && !f.text.includes(t)) f.text = (f.text ? f.text + ' · ' : '') + t;
+  f.text = f.text.slice(0, 800); f.at = stamp(today()); f.via = via; f.by = S.currentUser;
+  olog(o, 'feedback', `${f.rating ? FB_RATING[f.rating] : 'رأي'}${t ? ' · ' + t : ''}`);
+  // an unhappy customer goes to the owner's Telegram at once (again when they add the details)
+  if (f.rating === 1 && (was !== 1 || f.text !== hadText)) alert('bad', 'order', `😕 عميل مش راضي عن طلب ${o.no}\n${o.name} · ${o.phone}${f.text ? '\n«' + f.text + '»' : ''}\nكلّمه قبل ما يزعل.`, { type: 'order', id: o.id, no: o.no });
+  audit('order_feedback', o.no, `رأي العميل في طلب ${o.no}: ${f.rating ? FB_RATING[f.rating] : 'من غير تقييم'}${t ? ' · ' + t : ''}`);
+  return { id: o.id, no: o.no, name: o.name, rating: f.rating, text: f.text };
+}
+function orderFeedback({ phone, id, rating, text }) { // shop endpoint (the bot)
+  return tx(() => { const o = fbTarget(phone, id); need(o, 'مفيش طلب متسلّم نسجّل عليه الرأي'); return saveFeedback(o, rating, text, 'whatsapp'); });
 }
 function orderPayLink({ id, url, intentionId, paymobOrderId, ref, amountCents }) { // shop endpoint: a Paymob pay link was made for this order
   return tx(() => {
@@ -1271,9 +1300,9 @@ function orderView(id) { // read-only: what the bot needs to message the custome
     invoice: inv ? { no: inv.no, date: inv.date, net: egpOf(inv.net), vat: egpOf(inv.vat), total: egpOf(inv.total), vatRate: S.settings.vatRate, deliveryFee: egpOf(inv.deliveryFee || 0) } : null,
     delivery: o.delivery ? { fee: egpOf(o.delivery.fee || 0), eta: (o.delivery.eta && o.delivery.eta.text) || '', note: o.delivery.note || '' } : null,
     paidAmount: egpOf(o.receiptNo && inv ? inv.total : o.paidAmount || 0), due: inv ? egpOf(Math.max(0, inv.total - (o.receiptNo ? inv.total : o.paidAmount || 0))) : null,
-    receiptNo: o.receiptNo || '', cardPaid: !!(o.card && o.card.status === 'paid'), sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt, out: !!o.outAt, delivered: !!o.deliveredAt };
+    receiptNo: o.receiptNo || '', cardPaid: !!(o.card && o.card.status === 'paid'), sent: !!o.sentAt, invoiceSent: !!o.invoiceSentAt, out: !!o.outAt, delivered: !!o.deliveredAt, fbAsked: !!o.fbAskedAt, feedback: o.feedback ? { rating: o.feedback.rating, text: o.feedback.text } : null };
 }
-function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
+function decideOrder({ id, action, reason, deliveryFee, eta, note, rating }) {
   return tx(() => {
     perm('sales', 'accountant');
     const o = orders().find(x => x.id === id); need(o, 'الطلب غير موجود');
@@ -1360,6 +1389,7 @@ function decideOrder({ id, action, reason, deliveryFee, eta, note }) {
       if (!o.outAt) { o.outAt = stamp(T); o.outBy = S.currentUser; }
       o.deliveredAt = stamp(T); o.deliveredBy = S.currentUser; olog(o, 'delivered', ''); return o;
     }
+    if (action === 'feedback') { need(o.deliveredAt, 'الرأي بيتسجل بعد ما الأوردر يوصل'); saveFeedback(o, rating, note, 'staff'); return o; }
     if (action === 'resend') { need(o.status === 'approved' && o.invoiceId, 'الفاتورة بتتبعت بعد الموافقة'); olog(o, 'edited', 'طلب إعادة إرسال الفاتورة'); return o; }
     fail('عملية غير معروفة');
   });
@@ -1987,7 +2017,7 @@ function branchBill({ customerId, from, to }) {
    costs, no invoice cost, no treasury documents, no audit log, and only the partners, invoices and orders their screens show.
    Screens come from the same rules as the menu: the role's defaults, the owner's «الشاشات لكل دور», or the person's own list. */
 const SCREEN_ROLES = { home: ['accountant', 'storekeeper', 'supervisor', 'sales'], alerts: ['accountant', 'storekeeper', 'supervisor', 'sales'], batches: ['supervisor', 'accountant'], worker: ['supervisor', 'worker', 'packer'],
-  cutting: ['supervisor', 'storekeeper', 'accountant'], stock: ['storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['storekeeper', 'accountant'], suppliers: ['storekeeper', 'accountant'], orders: ['sales', 'accountant'],
+  cutting: ['supervisor', 'storekeeper', 'accountant'], stock: ['storekeeper', 'supervisor', 'accountant', 'sales'], purchases: ['storekeeper', 'accountant'], suppliers: ['storekeeper', 'accountant'], orders: ['sales', 'accountant'], reviews: ['sales', 'accountant'],
   invoices: ['sales', 'accountant'], products: ['storekeeper', 'supervisor', 'sales', 'accountant'], customers: ['sales', 'accountant'], items: ['storekeeper', 'sales', 'accountant', 'supervisor'], treasury: ['accountant'], staff: ['accountant'],
   expenses: ['accountant'], journal: ['accountant'], coa: ['accountant'], reports: [], opening: ['accountant'], flow: ['accountant', 'storekeeper', 'supervisor', 'sales'], requests: [], audit: ['accountant'], users: [], access: [], settings: [] };
 const SCREEN_LOCKED = ['users', 'access', 'settings'], MONEY_SCREENS = ['treasury', 'staff', 'expenses', 'journal', 'coa', 'reports', 'opening', 'audit', 'requests'];
@@ -2007,7 +2037,7 @@ function fullBooks(st, user) { // who downloads everything: a cost role, or some
 function redactFor(st, user) {
   if (fullBooks(st, user)) return st;
   const out = JSON.parse(JSON.stringify(st)), V = new Set(user && user.active !== false && ROLES[user.role] && user.role !== 'pending' ? screensOf(st, user) : []);
-  const has = (...x) => x.some(k => V.has(k)), sees = { cust: has('customers', 'invoices', 'orders'), sup: has('purchases', 'suppliers'), inv: has('customers', 'invoices', 'orders'), ord: has('orders'), po: has('purchases', 'suppliers') };
+  const has = (...x) => x.some(k => V.has(k)), sees = { cust: has('customers', 'invoices', 'orders'), sup: has('purchases', 'suppliers'), inv: has('customers', 'invoices', 'orders'), ord: has('orders', 'reviews'), po: has('purchases', 'suppliers') };
   const d = out.docs || (out.docs = {});
   // journal: only the receivable / payable lines the statements on their screens are built from
   out.journal = (out.journal || []).map(j => ({ ...j, lines: j.lines.filter(l => (sees.cust && l.acc === '1201') || (sees.sup && l.acc === '2101')) })).filter(j => j.lines.length);
@@ -2405,7 +2435,7 @@ root.ERP = {
   ACCOUNTS, LEAF, MEAT_SECTIONS, redactFor, fullBooks, screensOf, SCREEN_ROLES, packStores, rawStores, itemCost, reopenBatch, cancelBatch, setCustomerPrices, rawSellable, avgCostPerUnit, sellStores, reopenButchery, lotUsage, butcheryEditInput, cancelButchery, updateUserAccess, butcheryEditOutput, butcheryDropInput, butcheryDropPack, CHANGE_OPS, decideChange, editPurchaseLine, invoiceReturn, invoicePrice, invoiceReturned, payLabel, updateAccess, finishMeat, returnRework, batchKg, batchCostNow, running, isOpenWeight, openButchery, butcheryInput, butcheryPack, butcheryOutput, butcheryDropOutput, newCutItem, closeButchery, butIn, butOut, butCost, butSale, BASE_ACCOUNTS, DEPOSIT_KINDS, depositSources, moneyKind, methodAcc, methodName, accLabel, staffName, personBalance, deposit, payLiability, advance, advanceBack, custody, settleCustody, saveAccount, deleteAccount, CAT_NAME, CAT_ACC, METHOD_NAME, WAREHOUSES, WH_USE, warehouses, whs, whUse, PACK_SIZES, ROLES, EXPENSE_ACCS,
   today, addDays, daysBetween, monthStart, monthEnd, mulDiv,
   item, partner, userName, whName, me, available, cashBalance, invoicePaid, partnerBalance, partnerTotals, partnerStatement, branchBill, batchById, issuedOf, priceFor, monthlyDepreciation,
-  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderPayLink, orderCardPaid, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
+  opening, purchase, transfer, cutting, createBatch, issue, requestCorrection, decideCorrection, closeBatch, invoice, receipt, catalog, orderStatus, placeOrder, decideOrder, orderProof, orderNotified, orderFeedback, FB_RATING, orderPayLink, orderCardPaid, orderView, proofTarget, normPhone, ORDER_METHODS, supplierPayment, expense, cashTransfer, depreciate, writeOff, watch,
   saveItem, savePartner, resetBooks, updateSelf, saveWarehouse, setUser, updateSettings, markAlertsRead, upsertUser, openingBalances, setRecipe, liveState, setState, packsOf, WEBSITE, cairoNow,
   ledger, bal, trialBalance, incomeStatement, balanceSheet, manufacturingAccount, integrity, stockAlerts, fmtQty, money, accType, debitNature, leafUnder,
 };
