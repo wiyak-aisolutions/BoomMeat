@@ -1149,6 +1149,7 @@ select.f{text-overflow:clip}
 .side .powered img{height:17px;width:auto;display:block}
 .side .powered:hover,.side .powered:focus-visible{opacity:1}
 .made{align-items:center;gap:8px;text-decoration:none}
+.side .powered,.made{direction:ltr} /* English credit: «Powered by» first, then the logo, in Arabic and English pages alike */
 .made span{font:500 10.5px Montserrat,sans-serif;letter-spacing:.06em;color:var(--mut,#7a8a87)}
 
 /* calm, no moving light (client saw a sweeping line and the sidebar flickering on Windows):
